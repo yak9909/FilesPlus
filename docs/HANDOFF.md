@@ -37,6 +37,11 @@
 - Phase 4: SMB（ブラウザ・provider・サムネイルキャッシュ・接続先保存、§5.3）
 - Phase 5〜6: 再生エンジン抽象化・L4・GIF シーク・その他形式
 
+## 再開の予約
+- CronCreate で **2026-11-11 07:43 に1回だけ**再開する予約（ジョブ ID `2e23f7a6`）を入れてある。内容は「HANDOFF.md・CLAUDE.md・WORKERS.md を読み、再開手順に従って作業を再開」。
+- この予約は **/clear では消えない**（ユーザー確認済み）。Claude を終了すると消えるので、その場合は手動で再開を依頼してもらう。
+- 予約の確認・取り消し: CronList / CronDelete。
+
 ## 注意
 - 作業フォルダの git で `error: daemon terminated` が出ることがある（fsmonitor）。無視してよいが、`git worktree add` が固まったら git プロセスを止めて作り直す。
 - 解析用の逆コンパイル結果は `analysis/`（git 管理外）。難読化名はこの版（versionCode 2081362）専用。
