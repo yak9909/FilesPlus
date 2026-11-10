@@ -1,18 +1,20 @@
-# 👋🧩 Morphe Patches template
+# 🧩 yak9909 Files Patches
 
-Template repository for Morphe Patches.
+Morphe patches for Files by Google (`com.google.android.apps.nbu.files`).
 
 ## ❓ About
 
-Patches for apps I like.
+Patches that add features to Files by Google while keeping its UI: configurable skip duration,
+folder-tab actions (delete folder, show empty folders, move selection to the current tab),
+multi-select and move queue while previewing, SMB storage, and better high-resolution playback.
 
-<!-- TODO: Update this about section with a brief introduction/summary about this repo and what it offers. -->
+Design documents (Japanese): [docs/DESIGN.md](docs/DESIGN.md), [docs/BUILD_PROCEDURE.md](docs/BUILD_PROCEDURE.md)
 
 ### How to use these patches
 
-Click the button below, or manually add this repo url to Morphe Manager: https://github.com/xyz-user/xyz-patches
+Click the button below, or manually add this repo url to Morphe Manager: https://github.com/yak9909/ModdedFiles
 
-<a href="https://morphe.software/add-source?github=xyz-user/xyz-patches">
+<a href="https://morphe.software/add-source?github=yak9909/ModdedFiles">
   <img src=".github/assets/add-to-morphe.svg" alt="Add to Morphe" height="48">
 </a>
 
@@ -100,4 +102,4 @@ See the [Morphe documentation](https://github.com/MorpheApp/morphe-documentation
 
 ## 📜 License
 
-UserXYZ Patches are licensed under the [GNU General Public License v3.0](LICENSE)
+yak9909 Files Patches are licensed under the [GNU General Public License v3.0](LICENSE)

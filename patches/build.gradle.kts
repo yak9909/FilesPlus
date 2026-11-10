@@ -1,12 +1,11 @@
-group = "app.template"
+group = "app.moddedfiles"
 
 patches {
-    // TODO: Update this section with your project details.
     about {
-        name = "UserXYZ Patches"
-        description = "Patches for apps I like"
-        source = "git@github.com:UserXYZ/morphe-patches.git"
-        author = "Awesome dev"
+        name = "yak9909 Files Patches"
+        description = "Patches for Files by Google: custom skip duration, folder tab actions, move queue, SMB, high-res playback"
+        source = "git@github.com:yak9909/ModdedFiles.git"
+        author = "yak9909"
         contact = "na"
         website = "na"
         license = "GPLv3"

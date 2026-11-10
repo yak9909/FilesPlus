@@ -132,3 +132,10 @@ node_modules/
 # Ignore IDEA files
 .idea/
 local.properties
+
+### ModdedFiles
+*.apk
+*.apkm
+*.apks
+*.xapk
+original/
