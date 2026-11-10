@@ -1,12 +1,13 @@
 # Files by Google 改造（ModdedFiles）設計書
 
-- 文書バージョン: 0.4（共通化の方針 P7 を追加、フォルダ削除を簡素化）
+- 文書バージョン: 0.5（SMB の方式を訂正、SMB のサムネイルキャッシュを追加）
 - 作成日: 2026-11-11
 
 ### 改訂履歴
 | 版 | 内容 |
 |----|------|
 | 0.1 | 初版 |
+| 0.5 | 解析で「その他のストレージ」の provider は Files 内で開けないと判明したため、SMB を「既存の入口＋元アプリと同じ見た目の SMB ブラウザ＋元アプリのプレビュー」に変更（§5.3）。SMB のサムネイルキャッシュと再生成（§5.3.1）を追加。P6（SMB を単独アプリにもする）は取り下げ |
 | 0.4 | 方針 P7 に沿って全体を見直し: 実装が1つしかない interface（SeekPolicy / SelectionStore / MoveQueue）を具象クラスに、使わない `SafPath` を削除、ModKit 用 Media3 の同梱は必要になる段階（L3・FFmpeg）まで遅らせる。方針 P7「既存機能の組み合わせで済む操作は新設しない／共通化は効率を損なわない範囲で」を追加。フォルダ削除から「カテゴリのファイルだけを削除」を外し、「全選択 → 削除」（既存機能）に任せる。`FolderTabContext` を必要最小限に縮小 |
 | 0.3 | フォルダタブ画面を全カテゴリ共通の部品として整理（§5.7）。「現在のフォルダタブへ移動」（§5.10）と空フォルダのタブ表示の設定（§5.9）を追加。端末が OPPO A54 5G と判明（§5.5）。パッチの置き場所を GitHub（`yak9909/ModdedFiles`）に決定 |
 | 0.2 | 配布・適用を **Morphe のパッチバンドル**に変更（root なし・adb なし）。フック位置の管理を yaml から fingerprint に変更。フォルダ削除の対象画面（画像一覧のフォルダタブ）を特定。2K/4K が再生できない件を §5.5 に反映 |
@@ -37,7 +38,7 @@ Files by Google の見た目・操作感を保ったまま、閲覧・整理ま�
 | P3 | **フック位置はバージョンごとのマッピングファイルで管理し、ModKit 本体は難読化名を直接知らない** | 抽象化。アップデート時はマッピングとアダプタだけを直せばよい |
 | P4 | ファイル操作・キュー・設定・履歴は**共通基盤**として一度だけ実装し、各機能から使う | 共通処理の抽出 |
 | P5 | 元アプリの Media3（ExoPlayer）は難読化済みで公開 API として使えない。**設定の変更で済むものは元アプリのプレイヤーにフックして行い**、公開 API が必須の処理（L3 の変換、FFmpeg）が必要になった段階で ModKit 側に別の Media3 を同梱する | 難読化された内部 API への依存を最小にしつつ、APK サイズ（Media3 の二重持ち）を必要になるまで増やさない（P7） |
-| P6 | 元アプリなしで成り立つ機能（SMB）は**外部アプリとしても動く形**で作る | 改造のリスクと工数を減らす |
+| P6 | ~~元アプリなしで成り立つ機能（SMB）は外部アプリとしても動く形で作る~~（0.5 で取り下げ: SMB は Files 内のブラウザが必要になったため、改造版の中だけで作る） | — |
 | P7 | **既存機能の組み合わせで実現できる操作は新設しない**。共通化・抽象化は**実際に2か所以上で使うもの**に限り、使う予定のない拡張点（将来のための interface など）は作らない。速度が要る処理（一覧の生成、再生）では抽象化のための余計な層・コピー・変換を挟まない | 操作の重複は UI を汚す。過度な抽象化はコード量と実行コストを増やす（0.4、ユーザー指摘） |
 
 ---
@@ -55,7 +56,7 @@ jadx 1.5.6 / apktool 3.0.3 で base.apk を解析した結果。クラス名は*
 | プレイヤー抽象 | `defpackage.kxj`（interface） | アプリ内部で使うプレイヤーのインターフェース |
 | ExoPlayer 生成 | `defpackage.kxo` | `new eds(...)`（LoadControl）→ `new edz(ctx)`（ExoPlayer.Builder）→ `edz.a()` で生成し、`VideoPlayerView` の SurfaceHolder に接続する |
 | Media3 | `androidx.media3.*` は**ほぼ難読化済み**（`eeq`＝ExoPlayerImpl、`eoy`＝MediaCodecVideoRenderer 相当） | 外からは公開 API として使えない → P5 |
-| 外部ストレージ一覧 | `defpackage.gip` case 4 | `android.content.action.DOCUMENTS_PROVIDER` で**端末上のすべての DocumentsProvider を列挙**し、`DocumentsProviderBrowserActivity` で閲覧できる → SMB はここから入れる（§5.3） |
+| 外部ストレージ一覧 | `defpackage.gip` case 4、`imh.a()`、`imq` | `android.content.action.DOCUMENTS_PROVIDER` で**端末上の DocumentsProvider を列挙**して「その他のストレージ」に出す。**タップすると provider のアプリ（またはシステムのファイル画面）を起動するだけで、Files 内では開かない**（0.5 で判明）→ SMB はタップ時の分岐にフックして ModKit の SMB ブラウザを開く（§5.3） |
 | フォルダ削除確認 | `defpackage.ijo` / `ijp` | 「フォルダ内のファイルも削除されます（100件超は"100+"）」の確認ダイアログが**すでにある** → 再利用する |
 | プレビュー画面 | `FilePreviewActivity`、`fragment_file_preview_gallery.xml`、`video_preview_item_fragment.xml`、`ImagePreviewView`（davemorrissey SubsamplingScaleImageView） | 拡大表示・動画再生の画面 |
 | 文言 | `quick_seek_discovery`「左右をダブルタップで10秒スキップ」、`media_controls_*_10_description`、`quick_seek_duration`「%1$d seconds」 | 秒数を変えたら文言も合わせる |
@@ -89,7 +90,6 @@ jadx 1.5.6 / apktool 3.0.3 で base.apk を解析した結果。クラス名は*
 │  別途同梱: Media3（ModKit 用・パッケージ名を変えたもの）、smbj、 │
 │            （任意）FFmpeg デコーダ                              │
 └─────────────────────────────────────────────────────────────┘
-          ▲ DocumentsProvider（SMB）は単独アプリでも動く
 ```
 
 ### 3.1 レイヤーの責務
@@ -199,28 +199,59 @@ object SelectionStore {                         // プレビュー（§5.2）と
 **フック**: `FilePreviewActivity` のメニュー生成と、ページ切り替え（今表示しているファイルの通知）。
 
 ### 5.3 SMB 接続（フォルダと同じように扱う）
-**方式**: **`SmbDocumentsProvider`（SAF の DocumentsProvider）** として実装する。
-- 元アプリはすでに端末上の DocumentsProvider を列挙して `DocumentsProviderBrowserActivity` で開ける（`gip` case 4）。**UI を作らなくても「その他のストレージ」に SMB が出る**。
-- 同じ provider を改造 APK に入れることも、**単独の小さなアプリとして配布する**こともできる（P6）。
-- **0.2 の決定**: Morphe のパッチ「SMB storage」で、`<provider>` を Manifest に追加して**改造版 Files の中に入れる**（ユーザーがインストールするものを増やさないため）。単独アプリ版は任意とする。
-- システムのファイル選択（SAF）からも使えるので、他のアプリでも SMB が使える。
+
+**0.5 の訂正（解析結果）**: 元アプリは「その他のストレージ」に端末上の DocumentsProvider を列挙する（`gip` case 4）が、**項目をタップしても Files の中では開かない**。`imh.a()` が、一部の既知の provider（`imq.b`）はシステムのファイル画面（DocumentsUI）で開き、それ以外は **provider を持つアプリのランチャー画面を起動するだけ**（`getLaunchIntentForPackage`）。`DocumentsProviderBrowserActivity` は provider の一覧を出す画面で、中身を閲覧する画面ではない。したがって「provider を足せば Files 内でフォルダのように使える」という 0.4 までの前提は誤り。
+
+**方式（0.5）**: 次の3つを組み合わせる。
+1. **入口は元アプリの「その他のストレージ」の一覧をそのまま使う**。改造版に入れた `SmbDocumentsProvider` がそこに「SMB」として表示される。タップ時の分岐（`imh.a()`）にフックし、**自分の authority のときは ModKit の SMB ブラウザを開く**（ランチャー起動の代わり）。
+2. **SMB ブラウザは元アプリの一覧と同じ見た目で作る**。元アプリのレイアウト・リスト項目（ファイル名・サイズ・日付・サムネイル・グリッド/リスト切替）・テーマ・選択時のメニュー構成を流用し、新しいデザインは作らない（P1）。中身は ModKit の VFS（`SmbVfsProvider`）から読む。
+   - 元アプリの一覧画面そのもの（`AdvancedBrowsingActivity` など）に SMB を流し込む案は、元アプリの移動・削除・プレビューが `java.io.File` 前提で SMB では動かないため、フックが深く広くなりすぎる（P7）ので採らない。
+3. **ファイルを開く・操作する**:
+   - 画像・動画は、provider の `content://` URI を元アプリのプレビュー（`FilePreviewActivity`。外部の VIEW インテントを受ける入口がある）に渡して開く。拡大表示・シーク・スキップ秒数・GIF のシークなどの改造機能もそのまま効く。
+   - 移動・コピー・削除・名前の変更・フォルダの作成は ModKit の FileOps（VFS 経由）で行う。移動キュー（§5.4）の移動先として SMB のフォルダも選べる。
+- provider は**システムのファイル選択（SAF）にも出る**ので、ほかのアプリからも SMB のファイルを開ける（副次的な効果）。
 
 **構成**
 | 部品 | 内容 |
 |------|------|
 | ライブラリ | **smbj**（SMB2/3、Apache-2.0）。SMB1 は使わない |
-| サーバー登録 | 接続先（ホスト、共有名、ユーザー、パスワード、ドメイン）。パスワードは Android Keystore で暗号化する |
-| 接続管理 | `SmbSessionPool`: サーバーごとにセッションを使い回す、アイドル時に切断、再接続 |
-| 一覧 | `queryChildDocuments` は非同期で読み込み、`EXTRA_LOADING`＋`notifyChange` で後から更新する |
-| 読み出し | `openDocument` → `StorageManager.openProxyFileDescriptor`（ランダムアクセス可能）で動画のシークにも対応する |
-| 書き込み | 一時ファイルに書いてから送る、または直接ストリームで書く |
-| 操作 | `FLAG_SUPPORTS_DELETE / RENAME / MOVE / COPY / WRITE / DIR_SUPPORTS_CREATE` を立てる |
+| サーバー登録 | 接続先（ホスト、共有名、ユーザー、パスワード、ドメイン）。パスワードは Android Keystore で暗号化する。SMB ブラウザの最上位に「＋ サーバーを追加」 |
+| 接続管理 | `SmbSessionPool`: サーバーごとにセッションを使い回す、アイドル時に切断、再接続。SMB ブラウザ・provider・FileOps・サムネイル生成で共有する |
+| 一覧 | ディレクトリ一覧はメモリにキャッシュ（30秒、更新操作のあとは破棄）。引っ張って更新に対応 |
+| 読み出し | provider の `openDocument` → `StorageManager.openProxyFileDescriptor`（ランダムアクセス可能）で、元アプリのプレビューでも動画のシークができる |
+| 書き込み | 直接ストリームで書く（失敗したら途中のファイルを消す） |
+| provider の操作 | SAF 用に `FLAG_SUPPORTS_DELETE / RENAME / WRITE / THUMBNAIL / DIR_SUPPORTS_CREATE` を立てる |
 | サーバー探索 | 手入力が基本。任意で mDNS（`_smb._tcp`）で候補を出す |
-| 登録画面 | ルートの「＋ サーバーを追加」（provider のルートとして表示）→ ModKit の Dialog |
 
-**VFS との関係**: `SmbVfsProvider` は provider と同じ `SmbSessionPool` を使う。移動キューで「ローカル → SMB」に送るときは VFS 経由で直接転送し、SAF を通さないので速い。
+### 5.3.1 SMB のサムネイルキャッシュ（0.5 で追加）
+**対象**: 一覧（リスト・グリッド）に出る**サムネイル**だけ。拡大表示や再生のときのデータはキャッシュしない。
 
-**要確認**: `DocumentsProviderBrowserActivity` の中で移動・削除・プレビューがどこまで使えるか。足りなければ、その画面のメニューに ModKit の操作を追加する（§9）。
+**生成**（ネットワークの転送量を抑える順に試す）
+| 種類 | 方法 |
+|------|------|
+| JPEG | まず EXIF に埋め込まれた小さなサムネイルを使う（先頭の数十 KB を読むだけ）。なければ全体を読んで `inSampleSize` で縮小デコード |
+| その他の画像（PNG・WebP・HEIC・AVIF） | 全体を読み、`ImageDecoder` で目標サイズに縮小デコード |
+| GIF・アニメーション画像 | 最初のフレーム |
+| 動画 | `MediaMetadataRetriever` に SMB のランダムアクセス読み出し（`MediaDataSource`）を渡す。ファイル全体ではなく、ヘッダーと目的のフレーム付近だけを読む。位置は長さの 10%。**ほぼ真っ黒なフレームは避けて次の候補（30% → 50%）を使う** |
+- サイズは長辺 512px の WebP（品質 80）。グリッドとリストの両方でこの1種類を使う。
+- 同時に生成する数はサーバーごとに2件まで。表示中の項目を優先し、画面外にスクロールしたものは取り消す。
+
+**キャッシュ**
+- 置き場所: アプリの内部ストレージ `files/modkit/smb_thumbs/`（`cacheDir` だとシステムに勝手に消されるため使わない）。
+- キー: `サーバーID + 共有名 + パス + ファイルサイズ + 更新日時` のハッシュ。**ファイルが変わればキーも変わるので、古いサムネイルは自動で使われなくなる**。
+- 索引: `modkit.db` の `smb_thumb` テーブル（キー、ファイル名、バイト数、最終使用日時、動画の場合はフレーム位置）。
+- 上限: 既定 500MB（設定で変更可）。超えたら最終使用日時の古い順に消す（LRU）。メモリ上にも小さな LRU（表示中の画面ぶん）を持つ。
+- 使い道は2つ（P7 の「2か所以上」に当たるので共通部品にする）: (1) SMB ブラウザの一覧、(2) provider の `openDocumentThumbnail`（SAF 経由のほかのアプリ）。
+
+**再生成**
+| 入口（どれも既存の形のメニューに項目を足すだけ） | 動作 |
+|------|------|
+| ファイルの長押し / 選択時のメニュー →「サムネイルを再生成」 | 選んだファイルのキャッシュを捨てて作り直す。**動画は前回と違う位置（10% → 30% → 50% → 70% の順に次へ）で作る**ので、気に入らないフレームのときに押せば変わる |
+| フォルダの︙メニュー →「このフォルダのサムネイルを再生成」 | フォルダ内のサムネイルを作り直す（サブフォルダは含めない） |
+| Mod 設定 → SMB →「サムネイルのキャッシュを消去」 | すべて消す。キャッシュの使用量もここに表示する |
+
+**事前作成（任意）**
+- 設定 `smb.thumbs.prefetch`（既定 ON、**Wi-Fi 接続時のみ**）: フォルダを開いたとき、そのフォルダの残りのサムネイルを裏で作っておく（画面外の分は優先度を下げる）。
 
 ### 5.4 プレビュー中に指定フォルダへ移動（キュー）＋移動先の履歴
 **挙動**
@@ -369,17 +400,16 @@ class MoveToCurrentTabAction(
 ## 6. ModKit の内部構成
 
 ### 6.1 モジュール
-0.2 では、下の `core/` と `hooks/` が Morphe テンプレートの `extensions/extension/` に、パッチ定義が `patches/` に入る（BUILD_PROCEDURE.md §2）。`smb-provider-app/` は任意（SMB は §5.3 のとおり改造 APK の中に入れる）。
+0.2 では、下の `core/` と `hooks/` が Morphe テンプレートの `extensions/extension/` に、パッチ定義が `patches/` に入る（BUILD_PROCEDURE.md §2）。SMB は §5.3 のとおり改造 APK の中だけに入れる。
 ```
 modkit/                         (Gradle, Kotlin, minSdk 31, targetSdk は元アプリに合わせる)
 ├─ core/
 │  ├─ platform/   vfs/ fileops/ jobqueue/ settings/ history/ uikit/ log/
-│  └─ feature/    seek/ selection/ movequeue/ media/ smb/ foldertabs/ folderops/ emptyfolder/ formats/
+│  └─ feature/    seek/ selection/ movequeue/ media/ smb/（browser, provider, thumbs）foldertabs/ folderops/ emptyfolder/ formats/
 ├─ hooks/
 │  ├─ Hooks.kt                  ← smali から呼ぶ static 入口（@JvmStatic）
 │  └─ adapters/v2081362/        ← 難読化クラスとの橋渡し（バージョンごとに作る）
 ├─ stubs/v2081362/              ← defpackage.kxj, qhs などの空のスタブ（compileOnly、出力に含めない）
-├─ smb-provider-app/            ← SMB の DocumentsProvider を単独アプリとしてビルドする
 └─ third_party/                 ← Media3（パッケージ名を変えて衝突を避ける）、smbj、（任意）ffmpeg
 ```
 - 元アプリにも難読化された Media3/AndroidX が入っているが、**名前が違うので衝突はしない**。ただし、こちらの Media3 も念のため `jarjar`/R8 で `modkit.shaded.media3` に名前を変える。
@@ -430,7 +460,7 @@ patches:
 | 1 | スキップ秒数の設定（§5.1）、**再生エンジン L1（§5.5、2K/4K 対策）** | L1 は ExoPlayer の生成にフックするだけなので早く試せる。効果の確認を優先する |
 | 2 | 共通基盤（VFS/FileOps/JobQueue/History）、**フォルダタブの共通部品（§5.7）**、フォルダごと削除（§5.8）、空のフォルダの表示（§5.9）、**現在のタブへ移動（§5.10）** | タブ一覧を作る処理とタブ切り替え時の選択の扱い |
 | 3 | プレビュー中の複数選択（§5.2）、移動キュー（§5.4） | ギャラリーのページ一覧の更新 |
-| 4 | SMB の DocumentsProvider（単独アプリ → 改造 APK にも同梱）（§5.3） | DocumentsProviderBrowser の操作範囲 |
+| 4 | SMB（provider・SMB ブラウザ・サムネイルキャッシュ）（§5.3） | 元アプリの一覧の見た目をどこまで流用できるか、プレビューへ `content://` を渡したときの動作 |
 | 5 | 再生エンジンの抽象化、L4（§5.5）、GIF のシーク（§5.6） | `kxj` アダプタの実装量 |
 | 6 | L3 プロキシ、FFmpeg、その他の形式 | APK サイズ、GPL |
 
@@ -449,7 +479,8 @@ adb は使わない前提。確認は、パッチを当てたアプリの「Mod 
 |---|------------|------|
 | 1 | `jpx.Z`（5秒）・`jpx.aa`（1秒）の用途（キーボードの ←/→ やシークバーの操作か） | 未 |
 | 2 | 「内部ストレージ」から入る一覧に空のフォルダが出るか | 未 |
-| 3 | `DocumentsProviderBrowserActivity` で使える操作（移動・削除・プレビュー・複数選択） | 未 |
+| 3 | `DocumentsProviderBrowserActivity` で使える操作 | **済**: provider の中身は Files 内では開けない（§5.3 で方式を変更） |
+| 10 | `FilePreviewActivity` に外部の `content://`（SMB の provider）を渡して、画像の拡大・動画の再生・シークができるか | 未 |
 | 4 | フォルダの削除ができない画面 | **済**: 画像・動画・ダウンロードなどのフォルダタブ画面（§5.7） |
 | 5 | GIF が今どの部品で表示されているか（Glide か ImageDecoder か） | 未 |
 | 6 | 再生できない高解像度の動画の具体例（解像度・コーデック）とエラー | 一部: 2K・4K が再生できない（§5.5） |
