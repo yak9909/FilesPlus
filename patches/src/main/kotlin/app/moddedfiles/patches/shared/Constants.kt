@@ -10,8 +10,8 @@ object Constants {
     /** Extension (ModKit) bundled into the patched app. */
     const val EXTENSION = "extensions/extension.mpe"
 
-    /** Static hook entry points called from patched smali. */
-    const val HOOKS = "Lapp/moddedfiles/extension/Hooks;"
+    /** Base JVM type prefix of extension classes, e.g. "${EXT}seek/SkipHooks;". */
+    const val EXT = "Lapp/moddedfiles/extension/"
 
     val COMPATIBILITY_FILES = Compatibility(
         name = "Files by Google",
