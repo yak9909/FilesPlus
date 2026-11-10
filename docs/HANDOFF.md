@@ -1,4 +1,4 @@
-# 引き継ぎメモ（最終更新: 2026-11-11 04:20）
+# 引き継ぎメモ（最終更新: 2026-11-11 04:25）
 
 /clear のあとに作業を再開するためのメモ。まず `CLAUDE.md`（運用ルール）と `docs/WORKERS.md`（ワーカーのセッション）を読むこと。
 
@@ -17,7 +17,9 @@
 | media | 2K/4K 再生（L1）と再生エラーの診断記録 | `.../media` / `w/media` | 01a1c6d0-905d-7682-9630-9e16e0025970 |
 
 - 依頼文: `worker-logs/prompts/<名前>.md`、ログ: `worker-logs/<名前>.log`、最後の返答: `worker-logs/<名前>.last.md`。
-- **Codex の5時間枠が 92% 使用の状態で起動した**ため、途中で止まっている可能性がある。リセットは **2026-11-11 07:41**。
+- **4つとも 04:20 頃に Codex の利用枠に達して途中で停止した**（リセットは **2026-11-11 07:40**）。セッション記録は4つとも残っており resume できる。途中までの変更は各 worktree に未コミットで残っている（`media` は `ModSettings.java` の変更と `docs/HIGH_RESOLUTION_PLAYBACK.md` も作成）。
+- 再開用の依頼文（英語）: `worker-logs/prompts/continue.md`。各ワーカーを次で再開する:
+  `bash scripts/codex-worker.sh resume <名前> <セッションID> worker-logs/prompts/continue.md`（4つ並行で background 実行してよい）
 
 ## 再開手順
 1. 各ワーカーの状態を確認: `worker-logs/<名前>.last.md` があれば完了。なければログ末尾を見て、止まっていれば
