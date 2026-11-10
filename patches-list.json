@@ -1,5 +1,106 @@
 {
   "NOTE": "Do NOT manually edit this file. This file is automatically updated when semantic release (release.yml) runs. Manually editing this file can break your releases and break third party tools that use this file.",
-  "version": "0.0.0",
-  "patches": []
+  "version": "1.0.0-dev.1",
+  "patches": [
+    {
+      "name": "Change package name",
+      "description": "Install Files alongside the system app with a different package name and label.",
+      "default": true,
+      "category": null,
+      "compatiblePackages": [
+        {
+          "packageName": "com.google.android.apps.nbu.files",
+          "name": "Files by Google",
+          "description": null,
+          "apkFileType": "APKM",
+          "appIconColor": "#4484F4",
+          "signatures": null,
+          "formFactor": "MOBILE",
+          "targets": [
+            {
+              "version": "1.13157.1011540316.0-release",
+              "versionCodes": null,
+              "isExperimental": false,
+              "minSdk": null,
+              "description": null
+            }
+          ]
+        }
+      ],
+      "options": [
+        {
+          "key": "packageName",
+          "title": "Package name",
+          "description": "A unique Android package name for the patched app.",
+          "required": true,
+          "type": "kotlin.String",
+          "default": "com.google.android.apps.nbu.files.mod",
+          "values": null
+        },
+        {
+          "key": "appLabel",
+          "title": "App label",
+          "description": "The application and launcher name in every language.",
+          "required": true,
+          "type": "kotlin.String",
+          "default": "Files Mod",
+          "values": null
+        }
+      ]
+    },
+    {
+      "name": "Custom skip duration",
+      "description": "Customize double-tap and button skip durations; long-press a skip button to change its duration.",
+      "default": true,
+      "category": null,
+      "compatiblePackages": [
+        {
+          "packageName": "com.google.android.apps.nbu.files",
+          "name": "Files by Google",
+          "description": null,
+          "apkFileType": "APKM",
+          "appIconColor": "#4484F4",
+          "signatures": null,
+          "formFactor": "MOBILE",
+          "targets": [
+            {
+              "version": "1.13157.1011540316.0-release",
+              "versionCodes": null,
+              "isExperimental": false,
+              "minSdk": null,
+              "description": null
+            }
+          ]
+        }
+      ],
+      "options": []
+    },
+    {
+      "name": "High-resolution playback",
+      "description": "Try videos beyond reported decoder limits, enable decoder fallback, and log playback diagnostics.",
+      "default": true,
+      "category": null,
+      "compatiblePackages": [
+        {
+          "packageName": "com.google.android.apps.nbu.files",
+          "name": "Files by Google",
+          "description": null,
+          "apkFileType": "APKM",
+          "appIconColor": "#4484F4",
+          "signatures": null,
+          "formFactor": "MOBILE",
+          "targets": [
+            {
+              "version": "1.13157.1011540316.0-release",
+              "versionCodes": null,
+              "isExperimental": false,
+              "minSdk": null,
+              "description": null
+            }
+          ]
+        }
+      ],
+      "options": []
+    }
+  ]
 }
