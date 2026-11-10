@@ -1,12 +1,13 @@
 # Files by Google 改造（ModdedFiles）設計書
 
-- 文書バージョン: 0.3（フォルダタブ機能の追加、端末の特定、GitHub リポジトリ作成）
+- 文書バージョン: 0.4（共通化の方針 P7 を追加、フォルダ削除を簡素化）
 - 作成日: 2026-11-11
 
 ### 改訂履歴
 | 版 | 内容 |
 |----|------|
 | 0.1 | 初版 |
+| 0.4 | 方針 P7 に沿って全体を見直し: 実装が1つしかない interface（SeekPolicy / SelectionStore / MoveQueue）を具象クラスに、使わない `SafPath` を削除、ModKit 用 Media3 の同梱は必要になる段階（L3・FFmpeg）まで遅らせる。方針 P7「既存機能の組み合わせで済む操作は新設しない／共通化は効率を損なわない範囲で」を追加。フォルダ削除から「カテゴリのファイルだけを削除」を外し、「全選択 → 削除」（既存機能）に任せる。`FolderTabContext` を必要最小限に縮小 |
 | 0.3 | フォルダタブ画面を全カテゴリ共通の部品として整理（§5.7）。「現在のフォルダタブへ移動」（§5.10）と空フォルダのタブ表示の設定（§5.9）を追加。端末が OPPO A54 5G と判明（§5.5）。パッチの置き場所を GitHub（`yak9909/ModdedFiles`）に決定 |
 | 0.2 | 配布・適用を **Morphe のパッチバンドル**に変更（root なし・adb なし）。フック位置の管理を yaml から fingerprint に変更。フォルダ削除の対象画面（画像一覧のフォルダタブ）を特定。2K/4K が再生できない件を §5.5 に反映 |
 
@@ -35,8 +36,9 @@ Files by Google の見た目・操作感を保ったまま、閲覧・整理ま�
 | P2 | **改造コードは独立したモジュール（ModKit）に分け、元アプリの smali への変更は「1か所＝1行の `invoke-static`」程度のフックに抑える** | 難読化名はバージョンごとに変わる。差分を最小にすれば追従しやすい |
 | P3 | **フック位置はバージョンごとのマッピングファイルで管理し、ModKit 本体は難読化名を直接知らない** | 抽象化。アップデート時はマッピングとアダプタだけを直せばよい |
 | P4 | ファイル操作・キュー・設定・履歴は**共通基盤**として一度だけ実装し、各機能から使う | 共通処理の抽出 |
-| P5 | 元アプリの Media3（ExoPlayer）は難読化済みで公開 API として使えない。**独自のメディア処理は ModKit 側に別の Media3 を同梱して持つ** | 難読化された内部 API への依存を避ける |
+| P5 | 元アプリの Media3（ExoPlayer）は難読化済みで公開 API として使えない。**設定の変更で済むものは元アプリのプレイヤーにフックして行い**、公開 API が必須の処理（L3 の変換、FFmpeg）が必要になった段階で ModKit 側に別の Media3 を同梱する | 難読化された内部 API への依存を最小にしつつ、APK サイズ（Media3 の二重持ち）を必要になるまで増やさない（P7） |
 | P6 | 元アプリなしで成り立つ機能（SMB）は**外部アプリとしても動く形**で作る | 改造のリスクと工数を減らす |
+| P7 | **既存機能の組み合わせで実現できる操作は新設しない**。共通化・抽象化は**実際に2か所以上で使うもの**に限り、使う予定のない拡張点（将来のための interface など）は作らない。速度が要る処理（一覧の生成、再生）では抽象化のための余計な層・コピー・変換を挟まない | 操作の重複は UI を汚す。過度な抽象化はコード量と実行コストを増やす（0.4、ユーザー指摘） |
 
 ---
 
@@ -109,11 +111,10 @@ jadx 1.5.6 / apktool 3.0.3 で base.apk を解析した結果。クラス名は*
 
 ## 4. 共通基盤（platform/）
 
-### 4.1 VFS（仮想ファイルシステム）— ローカル / SAF / SMB をまとめて扱う
+### 4.1 VFS（仮想ファイルシステム）— ローカル / SMB をまとめて扱う
 ```kotlin
-sealed interface VPath { val scheme: String }      // file://, content://, smb://
-data class LocalPath(val file: java.io.File) : VPath
-data class SafPath(val uri: android.net.Uri) : VPath
+sealed interface VPath { val scheme: String }      // file://, smb://
+data class LocalPath(val file: java.io.File) : VPath    // 元アプリは全ファイルアクセス権を持つので SD カードもこれで扱える
 data class SmbPath(val serverId: String, val share: String, val path: String) : VPath
 
 interface VfsProvider {
@@ -125,7 +126,7 @@ interface VfsProvider {
     suspend fun mkdirs(p: VPath)
     suspend fun delete(p: VPath, recursive: Boolean)
     suspend fun renameOrMove(src: VPath, dst: VPath): Boolean  // 同じ provider 内の高速移動。できなければ false
-    val capabilities: Set<Capability>                     // ATOMIC_MOVE, RANDOM_READ, TRASH …
+    // 実装はローカルと SMB の2つ（P7: 2つあるので interface にする）
 }
 object Vfs { fun of(p: VPath): VfsProvider }              // provider を登録して選ぶ
 ```
@@ -176,10 +177,7 @@ object Vfs { fun of(p: VPath): VfsProvider }              // provider を登録�
 **UI を変えずに、その場で n 秒を切り替える**
 - 早送り/巻き戻しボタンを**長押し**すると、小さなポップアップ（3 / 5 / 10 / 30 / カスタム）が出る。ボタンの見た目は変えない。
 
-```kotlin
-interface SeekPolicy { fun doubleTap(): Duration; fun button(): Duration }
-class PrefsSeekPolicy(private val s: ModSettings) : SeekPolicy
-```
+- 実装: フックは `ModSettings.skip.doubleTapSec` / `buttonSec` を読んで返すだけ（専用のクラスや interface は作らない。P7）。
 
 ### 5.2 拡大表示・再生しながらの複数選択（要件）
 **挙動**
@@ -193,7 +191,7 @@ class PrefsSeekPolicy(private val s: ModSettings) : SeekPolicy
 - 任意設定: 音量キーで選択を切り替える（既定はオフ）。
 
 ```kotlin
-interface SelectionStore {
+object SelectionStore {                         // プレビュー（§5.2）とタブ切り替え（§5.10）で共通
     val selected: StateFlow<Set<VPath>>
     fun toggle(p: VPath); fun clear(); fun addAll(ps: Collection<VPath>)
 }
@@ -235,8 +233,8 @@ interface SelectionStore {
 
 ```kotlin
 data class MoveRequest(val items: List<VPath>, val dest: VPath, val policy: ConflictPolicy)
-interface MoveQueue {
-    fun enqueue(r: MoveRequest): JobId          // JobQueue と FileOps を使う
+class MoveQueue(jobs: JobQueue, ops: FileOps) { // §5.4・§5.10 で共通
+    fun enqueue(r: MoveRequest): JobId
     val pending: StateFlow<List<JobSummary>>
     suspend fun undo(id: JobId)
 }
@@ -253,7 +251,12 @@ interface MoveQueue {
 | R3. デコードが遅くて追いつかない | カクカク・音ズレ | **L3: 低解像度のプロキシを作る** — Media3 Transformer で 720p/1080p の一時ファイルを作って再生する（キャッシュは LRU で最大 2GB）。作っている間はキーフレームだけの「プレビュー再生」を出す |
 | — | — | **L4**: 間引き再生。キーフレーム以外を落として、シーク・内容確認だけできるモード |
 
-**エンジンの抽象化**
+**0.4: L1 の実現方法と順序の見直し（P5・P7）**
+- L1 は**元アプリの ExoPlayer の生成（`kxo`）にフックして設定を変える**だけで試せる。別の Media3 は入れない。
+- なお ExoPlayer は既定でも「性能を超えるトラックしかない場合はそれを選ぶ」動作をするので、失敗の原因はデコーダの初期化（R2）である可能性もある。**Phase 0 の「診断」画面で実際のエラー（例外の種類・デコーダ名・解像度）を記録し、L1 で直るかどうかを先に確かめる**。
+- 直らない場合は L4（キーフレームだけ）を元アプリのプレイヤーへのフックで作る。L3（変換）と FFmpeg を入れる段階で初めて ModKit 用の Media3 を同梱する。
+
+**エンジンの抽象化**（エンジンが2つ以上（元アプリ / GIF / L3）になる時点で導入する）
 ```kotlin
 interface PlaybackEngine { fun canPlay(m: MediaProbe): Score; fun create(ctx: PlayCtx): ModPlayer }
 // 実装: AppDefaultEngine（元アプリの ExoPlayer のまま）, ModExoEngine（L1/L2）,
@@ -279,7 +282,7 @@ class EngineSelector(engines: List<PlaybackEngine>, probe: MediaProber)
 
 ### 5.6 いろいろなファイル形式に対応・GIF を動画のようにシーク
 **GIF（および Animated WebP / APNG）**
-- `GifEngine` で、**Media3 の `SimpleBasePlayer` を継承した `AnimatedImagePlayer`** を作る。動画と同じ Player なので、**元アプリの動画 UI（シークバー、再生/一時停止、ダブルタップスキップ、速度変更）がそのまま使える**。
+- `GifEngine` で `AnimatedImagePlayer` を作り、**元アプリのプレイヤーのインターフェース（`kxj`）を Hook 層のアダプタで実装する**。動画と同じ扱いになるので、**元アプリの動画 UI（シークバー、再生/一時停止、ダブルタップスキップ、速度変更）がそのまま使える**。Media3 の `SimpleBasePlayer` を使う案もあるが、そのためだけに Media3 を同梱するのは重いので採らない（P5・P7）。
 - デコード: Glide の `StandardGifDecoder` 相当を ModKit で持つ（Animated WebP は `ImageDecoder` / libwebp の demux）。
 - シーク: フレームごとの delay から「時刻 → フレーム番号」の表を作る。GIF は前のフレームに重ねて描く形式なので、**N フレームごと（例: 30）に全体のビットマップを保存しておき**、そこから目的のフレームまで進める。小さい GIF（全フレーム × 幅 × 高さ × 4 が 64MB 未満）は全フレームを保存する。
 - 出力: Player の video surface（`SurfaceView`）に `lockHardwareCanvas` で描く。
@@ -288,7 +291,7 @@ class EngineSelector(engines: List<PlaybackEngine>, probe: MediaProber)
 **その他の形式**
 | 種類 | 対応方針 |
 |------|---------|
-| 動画コンテナ | ModKit の Media3 の extractor（MP4/MKV/WebM/TS/FLV/AVI/OGG）。WMV/ASF・RMVB は FFmpeg extractor が必要（Phase 3） |
+| 動画コンテナ | 元アプリの Media3 の extractor（MP4/MKV/WebM/TS/FLV/AVI/OGG。元アプリに含まれていれば）。WMV/ASF・RMVB は FFmpeg extractor が必要（Phase 3） |
 | 動画/音声コーデック | 端末のデコーダ＋**FFmpeg デコーダ拡張**（nextlib または jellyfin media3-ffmpeg-decoder。**どちらも GPL-3.0** なので、配布するならソースの公開義務がある。自分だけで使うなら問題ない）。AC3/DTS/TrueHD 音声などで効果がある |
 | 画像 | HEIC/AVIF は OS（API 31+）でデコードできる。JPEG XL・RAW（DNG 以外）は Phase 3 以降に検討する |
 | テキスト系 | 元アプリにテキスト/ZIP/PDF プレビューがある。拡張子と MIME の対応表を ModKit で広げる（例: `.log` `.md` `.json` `.srt` をテキストプレビューに回す） |
@@ -298,38 +301,27 @@ class EngineSelector(engines: List<PlaybackEngine>, probe: MediaProber)
 ### 5.7 フォルダタブ画面の共通化（0.3 で追加）
 ユーザーが使いたい3機能（フォルダごと削除・空フォルダの表示・現在のタブへ移動）は、どれも「**カテゴリを開いたときにフォルダがタブとして並ぶ画面**」が舞台になる。この画面は画像だけでなく**動画・音声・ダウンロードなどのカテゴリでも同じ部品**（`tabbed_file_browser_fragment_v3.xml`＝`TabLayout @id/tabs`＋`ViewPager2`、右上メニュー `res/menu/tabbed_fragment_menu_v2.xml`、選択時メニュー `tabbed_fragment_regular_selection_mode_menu_v2.xml`）で作られている。そこで、**カテゴリごとに作らず、この画面に対して1回だけフックする**。
 
-**共通部品 `FolderTabContext`**（`feature/foldertabs/`）
+**共通部品 `FolderTabContext`**（`feature/foldertabs/`。3機能すべてが使うので共通化する。P7）
 ```kotlin
-enum class TabCategory { IMAGES, VIDEOS, AUDIO, DOWNLOADS, DOCUMENTS, OTHER }
-
-sealed interface TabTarget {
-    data object All : TabTarget                               // 「すべて」など、フォルダではないタブ
-    data class Folder(val dir: VPath, val bucketId: Long?) : TabTarget
-    data class Virtual(val label: String) : TabTarget         // フォルダに対応しないタブ（アプリ別など）
-}
-
-interface FolderTabContext {
-    val category: TabCategory
-    val current: StateFlow<TabTarget>                         // ページ切り替えで更新
-    fun tabs(): List<TabTarget>
-    fun matches(file: VPath): Boolean                         // そのカテゴリに表示される種類か（画像タブなら画像だけ）
-    fun refresh()                                             // 操作後に一覧とタブを読み直す
+class FolderTabContext {
+    val currentFolder: StateFlow<LocalPath?>   // 今のタブのフォルダ。「すべて」などフォルダでないタブは null
+    fun refresh()                              // 操作後に一覧とタブを読み直す（元アプリの再読み込みを呼ぶ）
 }
 ```
-- タブ → 実際のフォルダの解決は `TabFolderResolver` が行う。MediaStore の bucket（`BUCKET_ID` → `RELATIVE_PATH`）を基本とし、ダウンロードなど bucket でないタブは、タブが持つパス情報から解決する。**フォルダに解決できないタブ（`All` / `Virtual`）では、下の3機能のメニューを出さない**。
+- 3機能はどれも「今のタブ → フォルダ」が分かれば足りるので、interface やカテゴリ種別は設けない（P7）。カテゴリによって振る舞いを変える必要が出たときに足す。
+- タブ → フォルダの解決は、タブが持つ bucket（`BUCKET_ID` → MediaStore の `RELATIVE_PATH`）から求める。ダウンロードなど bucket でないタブはタブのパス情報から求める。**解決はタブ切り替え時に1回だけ行い、結果をタブごとにキャッシュする**（メニューを開くたびに MediaStore を問い合わせない）。
+- `currentFolder` が null のタブでは、下の3機能のメニューを出さない。
 - フック: (1) タブ画面の生成（カテゴリの判定）、(2) ViewPager2 のページ切り替え、(3) 右上メニューと選択時メニューの生成・クリック、(4) タブ一覧を作る処理の最後。各カテゴリのタブがどの部品から作られているか（特にダウンロード）は実装時に jadx で確認する（§9）。
 
 ### 5.8 フォルダごと削除
 - 元アプリには**フォルダ削除の確認ダイアログ（`ijo`/`ijp`）がすでにある**が、フォルダタブ画面からは呼べない（タブはフォルダそのものではないため）。
 - 対応:
-  1. 右上の︙メニュー（`tabbed_fragment_menu_v2.xml`）に「**このフォルダを削除**」を1行足す。見た目は変わらない。`TabTarget.Folder` のときだけ表示する。全カテゴリ共通。
-  2. 確認ダイアログで次の2つを選べるようにする:
-     - 「このフォルダの**<カテゴリ>だけ**を削除」（例: 動画タブなら動画だけ。`FolderTabContext.matches`）
-     - 「**フォルダごと**削除（ほかの種類のファイルも含む）」— タブに見えていないファイルまで消えることを件数つきで明示する
-  3. 件数の表示（100件を超えたら「100+」）は既存ダイアログの文言を再利用する。
+  1. 右上の︙メニュー（`tabbed_fragment_menu_v2.xml`）に「**このフォルダを削除**」を1行足す。見た目は変わらない。`currentFolder` があるタブのときだけ表示する。全カテゴリ共通。
+  2. 削除は**フォルダごと**だけにする。「そのカテゴリのファイルだけを消したい」場合は、元アプリの「すべて選択 → 削除」で足りるので新しい項目は作らない（P7）。
+  3. 確認は既存のフォルダ削除ダイアログ（`ijo`/`ijp`）をそのまま使う（件数の表示、100件を超えたら「100+」）。タブには見えていないほかの種類のファイルも消えるので、件数は**フォルダ内のすべてのファイル**で数える。
   4. 実行は `FileOps.Delete(recursive=true)` を JobQueue で行う。進捗の通知を出し、途中でキャンセルできる。
-  5. 安全策: ストレージのルート、`Android/`、`DCIM/`・`Download/`・`Movies/`・`Pictures/` などの標準フォルダそのものは「フォルダごと削除」できない（中身だけ削除は可）（`ProtectedPaths`）。
-  6. ゴミ箱: 元アプリのゴミ箱はファイル単位。「<カテゴリ>だけを削除」は元アプリのゴミ箱へ、「フォルダごと」は完全削除（任意設定で ModKit のゴミ箱 `.modtrash/` に移して30日後に削除）。
+  5. 安全策: ストレージのルート、`Android/`、`DCIM/`・`Download/`・`Movies/`・`Pictures/` などの標準フォルダそのものは削除できない（項目を出さない）。中身を消したいときは「すべて選択 → 削除」を使う（`ProtectedPaths`）。
+  6. ゴミ箱: 元アプリのゴミ箱はファイル単位でフォルダを扱えないため、フォルダ削除は完全削除とする（既存ダイアログの文言もそうなっている）。独自のゴミ箱は作らない（P7。必要になったら検討する）。
   7. 削除後は `FolderTabContext.refresh()` でタブを消し、隣のタブへ移る。
 - 内部ストレージから入るフォルダ一覧の「フォルダの操作」メニューにも同じ処理を出す（Phase 2 の後半）。
 
@@ -342,7 +334,7 @@ interface FolderTabContext {
   | `tabs.emptyFolderScope` | 「そのカテゴリのファイルが一度でもあったフォルダ＋標準フォルダ」 | どのフォルダを足すか。選択肢: 上記 / 指定したフォルダ配下のすべて / ストレージ全体（遅い） |
   | `tabs.showHidden` | OFF | `.` から始まるフォルダも出す |
   | `browse.showEmptyFolders` | ON | 内部ストレージの一覧にも空フォルダを出す（出ない場合のみ有効） |
-- 実装: タブ一覧を作る処理の最後で `EmptyFolderTabAugmenter` が `TabTarget.Folder` を足す。中身が空のタブを開いたときは、元アプリの空表示（`NoFilesBlobView`「There's nothing here.」）がそのまま出るので UI の追加は不要。
+- 実装: タブ一覧を作る処理の最後で `EmptyFolderTabAugmenter` がフォルダのタブを足す。中身が空のタブを開いたときは、元アプリの空表示（`NoFilesBlobView`「There's nothing here.」）がそのまま出るので UI の追加は不要。
 - 「一度でもあったフォルダ」は、ModKit がタブを読み込むたびにフォルダを `KnownFolders`（`modkit.db`）に記録して覚える。これによって「中身を全部移動したらタブが消えて、そこへ戻せない」問題を防ぐ。
 - 性能: ディレクトリの走査は変更日時でキャッシュし、タブ一覧の作成に足す時間を 50ms 以内に抑える。
 
@@ -356,7 +348,7 @@ interface FolderTabContext {
 
 **設計上のポイント**
 - **タブを切り替えても選択を保つ**: 元アプリがページ切り替えで選択を解除する場合に備えて、選択の変化を `SelectionStore`（§5.2 と同じもの）に写しておき、切り替え後のタブで選択モードを復元する。選択数の表示は元アプリの選択バーをそのまま使う。
-- 項目を出す条件: 現在のタブが `TabTarget.Folder`、かつ選択中に「現在のタブ以外のフォルダのファイル」が1件以上ある。すでにそのフォルダにあるファイルは対象から外す。
+- 項目を出す条件: `currentFolder` が null でない、かつ選択中に「現在のタブ以外のフォルダのファイル」が1件以上ある。すでにそのフォルダにあるファイルは対象から外す。
 - 名前がぶつかったときは `ConflictPolicy`（既定は「確認する」）。
 - 元アプリの「移動」（フォルダを選ぶ画面に移る）は残す。こちらは「今見ているタブへ1タップで移動する」近道。
 - 空のフォルダのタブ（§5.9）にも移動できるので、「新しいフォルダを作る → タブに出す → 選択して移動」がこの画面だけで完結する。
