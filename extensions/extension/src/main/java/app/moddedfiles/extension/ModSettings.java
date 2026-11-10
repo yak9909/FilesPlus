@@ -7,6 +7,9 @@ import android.content.SharedPreferences;
 public final class ModSettings {
     public static final String PREFS = "modkit_prefs";
 
+    public static final String MEDIA_TRY_EXCEED_CAPABILITIES = "media.tryExceedCapabilities";
+    public static final boolean DEFAULT_MEDIA_TRY_EXCEED_CAPABILITIES = true;
+
     public static final String SKIP_DOUBLE_TAP_SEC = "skip.doubleTapSec";
     public static final String SKIP_BUTTON_SEC = "skip.buttonSec";
     public static final int DEFAULT_SKIP_SEC = 10;
