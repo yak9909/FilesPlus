@@ -5,14 +5,14 @@ Project: Morphe patch bundle for **Files by Google** (`com.google.android.apps.n
 Design (Japanese) is in `docs/DESIGN.md`; your task prompt quotes the parts you need.
 
 ## Layout
-- Patches (Kotlin, Morphe patcher API): `patches/src/main/kotlin/app/moddedfiles/patches/<feature>/`
+- Patches (Kotlin, Morphe patcher API): `patches/src/main/kotlin/app/filesplus/patches/<feature>/`
   - Use `Constants.COMPATIBILITY_FILES`, `Constants.EXTENSION` (`extendWith(...)`), `Constants.EXT` from `shared/Constants.kt`.
   - Morphe docs: https://github.com/MorpheApp/morphe-patcher/tree/main/docs (patch anatomy, fingerprinting, APIs).
     The patcher jar/sources are also in the Gradle cache (`~/.gradle/caches`, `app.morphe`), read them when unsure.
-- Extension (Java, compiled to dex and merged into the app): `extensions/extension/src/main/java/app/moddedfiles/extension/<feature>/`
+- Extension (Java, compiled to dex and merged into the app): `extensions/extension/src/main/java/app/filesplus/extension/<feature>/`
   - Shared core (do not rename; add keys/methods only if your task says so): `ModKit` (app context, `init`),
     `ModSettings` (SharedPreferences "modkit_prefs"), `DiagLog` (in-app diagnostic log; the user cannot use adb).
-  - Put your hook entry points in a per-feature class, e.g. `app.moddedfiles.extension.seek.SkipHooks`.
+  - Put your hook entry points in a per-feature class, e.g. `app.filesplus.extension.seek.SkipHooks`.
     Every hook method must catch `Throwable`, log via `DiagLog.e`, and fall back to the original behavior.
   - The extension has **no Android resources** (no layouts/strings). Build UI programmatically.
     App resources can be looked up by name at runtime (`getIdentifier`).

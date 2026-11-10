@@ -1,4 +1,4 @@
-# CLAUDE.md — ModdedFiles
+# CLAUDE.md — FilesPlus
 
 Morphe patch bundle that adds features to **Files by Google** (`com.google.android.apps.nbu.files`) without changing its UI.
 Design: `docs/DESIGN.md` (source of truth, Japanese). Build/apply procedure: `docs/BUILD_PROCEDURE.md`.
@@ -11,12 +11,13 @@ Talk to the user in Japanese.
 - Keep the original UI design. New UI only as items in existing menus, long-press, or on-demand bottom sheets.
 
 ## Repository / release
-- GitHub: https://github.com/yak9909/ModdedFiles (public). Use `gh` for GitHub operations (account `yak9909`).
+- GitHub: https://github.com/yak9909/FilesPlus (public). Use `gh` for GitHub operations (account `yak9909`).
 - Work on `dev`; merge `dev` → `main` for stable (no squash). Semantic commits: `feat:` / `fix:` create releases (CI `release.yml`), `chore:` does not.
 - Never hand-edit generated files: `patches-list.json`, `patches-bundle.json`, `CHANGELOG.md`.
 - Build: `./gradlew buildAndroid` → `patches/build/libs/patches-*.mpp` (needs JDK 21: `C:\Program Files\Java\jdk-21.0.3`; jdk-26 breaks tools; Android SDK; GitHub token with `read:packages`).
 
 ## Local files (git-ignored)
+- The project was renamed ModdedFiles → **FilesPlus** (2026-11-11). The local folder is still `E:/Projects/ModdedFiles` (renaming it would break Claude's session/memory path); worker worktrees go under `E:/Projects/ModdedFiles-wt/`.
 - `original/` — original APKM (Files 1.13157.1011540316.0-release, versionCode 2081362, armeabi-v7a).
 - `analysis/jadx/` — jadx 1.5.6 decompiled sources (`sources/defpackage/*` = obfuscated app code).
 - `analysis/apktool/` — apktool 3.0.3 decoded resources/manifest (`res/`, `AndroidManifest.xml`).

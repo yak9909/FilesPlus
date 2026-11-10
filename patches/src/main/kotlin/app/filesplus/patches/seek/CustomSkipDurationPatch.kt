@@ -1,7 +1,7 @@
-package app.moddedfiles.patches.seek
+package app.filesplus.patches.seek
 
-import app.moddedfiles.patches.misc.modKitIntegrationPatch
-import app.moddedfiles.patches.shared.Constants
+import app.filesplus.patches.misc.modKitIntegrationPatch
+import app.filesplus.patches.shared.Constants
 import app.morphe.patcher.extensions.InstructionExtensions.addInstructions
 import app.morphe.patcher.extensions.InstructionExtensions.replaceInstruction
 import app.morphe.patcher.patch.bytecodePatch

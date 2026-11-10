@@ -133,7 +133,7 @@ node_modules/
 .idea/
 local.properties
 
-### ModdedFiles
+### FilesPlus
 *.apk
 *.apkm
 *.apks

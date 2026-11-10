@@ -1,4 +1,4 @@
-package app.moddedfiles.extension.media;
+package app.filesplus.extension.media;
 
 /** The patch adds the bundled Player.Listener interface and its callbacks to this class. */
 public final class PlaybackListener {

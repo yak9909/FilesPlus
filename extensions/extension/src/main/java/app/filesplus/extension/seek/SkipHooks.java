@@ -1,4 +1,4 @@
-package app.moddedfiles.extension.seek;
+package app.filesplus.extension.seek;
 
 import android.app.AlertDialog;
 import android.content.Context;
@@ -10,8 +10,8 @@ import android.widget.PopupMenu;
 
 import java.util.Locale;
 
-import app.moddedfiles.extension.DiagLog;
-import app.moddedfiles.extension.ModSettings;
+import app.filesplus.extension.DiagLog;
+import app.filesplus.extension.ModSettings;
 
 public final class SkipHooks {
     private SkipHooks() {}

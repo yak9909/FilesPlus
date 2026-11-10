@@ -1,9 +1,9 @@
-package app.moddedfiles.extension.media;
+package app.filesplus.extension.media;
 
 import android.media.MediaCodec;
 
-import app.moddedfiles.extension.DiagLog;
-import app.moddedfiles.extension.ModSettings;
+import app.filesplus.extension.DiagLog;
+import app.filesplus.extension.ModSettings;
 
 import java.util.ArrayDeque;
 import java.util.IdentityHashMap;

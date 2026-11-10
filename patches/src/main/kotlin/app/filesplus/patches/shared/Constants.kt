@@ -1,4 +1,4 @@
-package app.moddedfiles.patches.shared
+package app.filesplus.patches.shared
 
 import app.morphe.patcher.patch.ApkFileType
 import app.morphe.patcher.patch.AppTarget
@@ -11,7 +11,7 @@ object Constants {
     const val EXTENSION = "extensions/extension.mpe"
 
     /** Base JVM type prefix of extension classes, e.g. "${EXT}seek/SkipHooks;". */
-    const val EXT = "Lapp/moddedfiles/extension/"
+    const val EXT = "Lapp/filesplus/extension/"
 
     val COMPATIBILITY_FILES = Compatibility(
         name = "Files by Google",

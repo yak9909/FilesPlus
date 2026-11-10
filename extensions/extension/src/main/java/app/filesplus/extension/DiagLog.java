@@ -1,4 +1,4 @@
-package app.moddedfiles.extension;
+package app.filesplus.extension;
 
 import android.util.Log;
 

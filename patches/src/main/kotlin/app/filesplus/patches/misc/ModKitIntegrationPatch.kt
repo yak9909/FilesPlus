@@ -1,6 +1,6 @@
-package app.moddedfiles.patches.misc
+package app.filesplus.patches.misc
 
-import app.moddedfiles.patches.shared.Constants
+import app.filesplus.patches.shared.Constants
 import app.morphe.patcher.extensions.InstructionExtensions.addInstruction
 import app.morphe.patcher.extensions.InstructionExtensions.addInstructions
 import app.morphe.patcher.patch.bytecodePatch
@@ -24,7 +24,7 @@ import org.w3c.dom.Element
 private const val PREFERENCE = "Landroidx/preference/Preference;"
 private const val CONTEXT = "Landroid/content/Context;"
 private const val INTENT = "Landroid/content/Intent;"
-private const val SETTINGS_ACTIVITY = "app.moddedfiles.extension.settings.ModSettingsActivity"
+private const val SETTINGS_ACTIVITY = "app.filesplus.extension.settings.ModSettingsActivity"
 private const val HOOKS = "${Constants.EXT}settings/SettingsHooks;"
 
 private val modKitManifestPatch = resourcePatch {

@@ -1,7 +1,7 @@
-package app.moddedfiles.patches.media
+package app.filesplus.patches.media
 
-import app.moddedfiles.patches.misc.modKitIntegrationPatch
-import app.moddedfiles.patches.shared.Constants
+import app.filesplus.patches.misc.modKitIntegrationPatch
+import app.filesplus.patches.shared.Constants
 import app.morphe.patcher.extensions.InstructionExtensions.addInstructions
 import app.morphe.patcher.extensions.InstructionExtensions.addInstructionsWithLabels
 import app.morphe.patcher.fingerprint

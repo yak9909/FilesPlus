@@ -1,7 +1,7 @@
-package app.moddedfiles.patches.misc
+package app.filesplus.patches.misc
 
-import app.moddedfiles.patches.shared.Constants.COMPATIBILITY_FILES
-import app.moddedfiles.patches.shared.Constants.ORIGINAL_PACKAGE
+import app.filesplus.patches.shared.Constants.COMPATIBILITY_FILES
+import app.filesplus.patches.shared.Constants.ORIGINAL_PACKAGE
 import app.morphe.patcher.patch.classDefForEach
 import app.morphe.patcher.patch.listDecodableFiles
 import app.morphe.patcher.patch.mutableClassDefBy
@@ -39,7 +39,7 @@ val packageNamePatch = patch(
     )
     val appLabel by stringOption(
         key = "appLabel",
-        default = "Files Mod",
+        default = "FilesPlus",
         title = "App label",
         description = "The application and launcher name in every language.",
         required = true,

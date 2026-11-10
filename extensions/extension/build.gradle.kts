@@ -3,5 +3,5 @@ extension {
 }
 
 android {
-    namespace = "app.moddedfiles.extension"
+    namespace = "app.filesplus.extension"
 }

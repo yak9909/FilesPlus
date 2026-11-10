@@ -1,8 +1,8 @@
-package app.moddedfiles.extension.settings;
+package app.filesplus.extension.settings;
 
 import android.content.Context;
 import android.content.Intent;
-import app.moddedfiles.extension.DiagLog;
+import app.filesplus.extension.DiagLog;
 
 /** SDK-only entry points used by the settings bytecode patch. */
 public final class SettingsHooks {

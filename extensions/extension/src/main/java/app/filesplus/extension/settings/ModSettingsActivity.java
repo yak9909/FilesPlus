@@ -1,4 +1,4 @@
-package app.moddedfiles.extension.settings;
+package app.filesplus.extension.settings;
 
 import android.app.Activity;
 import android.app.AlertDialog;
@@ -21,9 +21,9 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
-import app.moddedfiles.extension.DiagLog;
-import app.moddedfiles.extension.ModKit;
-import app.moddedfiles.extension.ModSettings;
+import app.filesplus.extension.DiagLog;
+import app.filesplus.extension.ModKit;
+import app.filesplus.extension.ModSettings;
 import java.util.Collections;
 import java.util.List;
 

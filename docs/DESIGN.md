@@ -1,4 +1,4 @@
-# Files by Google 改造（ModdedFiles）設計書
+# Files by Google 改造（FilesPlus）設計書
 
 - 文書バージョン: 0.6（SMB の接続先の保存とワンタップ再接続を追加）
 - 作成日: 2026-11-11
@@ -10,14 +10,14 @@
 | 0.6 | SMB の接続先の保存、タップだけでの再接続、自動再接続、失敗時の扱いを追加（§5.3.2） |
 | 0.5 | 解析で「その他のストレージ」の provider は Files 内で開けないと判明したため、SMB を「既存の入口＋元アプリと同じ見た目の SMB ブラウザ＋元アプリのプレビュー」に変更（§5.3）。SMB のサムネイルキャッシュと再生成（§5.3.1）を追加。P6（SMB を単独アプリにもする）は取り下げ |
 | 0.4 | 方針 P7 に沿って全体を見直し: 実装が1つしかない interface（SeekPolicy / SelectionStore / MoveQueue）を具象クラスに、使わない `SafPath` を削除、ModKit 用 Media3 の同梱は必要になる段階（L3・FFmpeg）まで遅らせる。方針 P7「既存機能の組み合わせで済む操作は新設しない／共通化は効率を損なわない範囲で」を追加。フォルダ削除から「カテゴリのファイルだけを削除」を外し、「全選択 → 削除」（既存機能）に任せる。`FolderTabContext` を必要最小限に縮小 |
-| 0.3 | フォルダタブ画面を全カテゴリ共通の部品として整理（§5.7）。「現在のフォルダタブへ移動」（§5.10）と空フォルダのタブ表示の設定（§5.9）を追加。端末が OPPO A54 5G と判明（§5.5）。パッチの置き場所を GitHub（`yak9909/ModdedFiles`）に決定 |
+| 0.3 | フォルダタブ画面を全カテゴリ共通の部品として整理（§5.7）。「現在のフォルダタブへ移動」（§5.10）と空フォルダのタブ表示の設定（§5.9）を追加。端末が OPPO A54 5G と判明（§5.5）。パッチの置き場所を GitHub（`yak9909/FilesPlus`）に決定 |
 | 0.2 | 配布・適用を **Morphe のパッチバンドル**に変更（root なし・adb なし）。フック位置の管理を yaml から fingerprint に変更。フォルダ削除の対象画面（画像一覧のフォルダタブ）を特定。2K/4K が再生できない件を §5.5 に反映 |
 
 ### ユーザー環境（0.2 で判明）
 - root なし。adb はなるべく使わない。**Morphe Manager は導入済み**
 - Files は**システムアプリ** → パッケージ名を変えて共存させる
 - 端末: **OPPO A54 5G**（Snapdragon 480、64bit CPU で 32bit アプリも動く、ColorOS）
-- パッチのビルドと配布: **GitHub**（https://github.com/yak9909/ModdedFiles 、GitHub Actions でビルド・リリース）
+- パッチのビルドと配布: **GitHub**（https://github.com/yak9909/FilesPlus 、GitHub Actions でビルド・リリース）
 - 2K・4K の動画が再生できなかった
 - 対象 APK: `com.google.android.apps.nbu.files` 1.13157.1011540316.0-release（versionCode 2081362）
   - minSdk 31（Android 12+）、ABI は **armeabi-v7a のみ**、640dpi split、24言語 split

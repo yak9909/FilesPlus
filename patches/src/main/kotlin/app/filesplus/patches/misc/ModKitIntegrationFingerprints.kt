@@ -1,4 +1,4 @@
-package app.moddedfiles.patches.misc
+package app.filesplus.patches.misc
 
 import app.morphe.patcher.Fingerprint
 

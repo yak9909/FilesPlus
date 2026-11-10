@@ -12,16 +12,16 @@ Design documents (Japanese): [docs/DESIGN.md](docs/DESIGN.md), [docs/BUILD_PROCE
 
 ### How to use these patches
 
-Click the button below, or manually add this repo url to Morphe Manager: https://github.com/yak9909/ModdedFiles
+Click the button below, or manually add this repo url to Morphe Manager: https://github.com/yak9909/FilesPlus
 
-<a href="https://morphe.software/add-source?github=yak9909/ModdedFiles">
+<a href="https://morphe.software/add-source?github=yak9909/FilesPlus">
   <img src=".github/assets/add-to-morphe.svg" alt="Add to Morphe" height="48">
 </a>
 
 ## 🩹 Patches list
 
 <!-- PATCHES_START EXPANDED -->
-> **[v1.0.0-dev.1](https://github.com/yak9909/ModdedFiles/releases/tag/v1.0.0-dev.1)**&nbsp;&nbsp;•&nbsp;&nbsp;`dev`&nbsp;&nbsp;•&nbsp;&nbsp;3 patches total
+> **[v1.0.0-dev.1](https://github.com/yak9909/FilesPlus/releases/tag/v1.0.0-dev.1)**&nbsp;&nbsp;•&nbsp;&nbsp;`dev`&nbsp;&nbsp;•&nbsp;&nbsp;3 patches total
 <details open>
 <summary>📦 Files by Google&nbsp;&nbsp;•&nbsp;&nbsp;3 patches</summary>
 <br>

@@ -12,7 +12,7 @@
 - まだ確かめていないこと: 実機での動作全般。全パッチをまとめて元の APK に当てる確認はしていない（各パッチは単独で確認済み）。
 
 ## 次にやること
-1. ユーザーに実機で試してもらう: Morphe Manager の「パッチソース → リモート」に `https://github.com/yak9909/ModdedFiles` を追加し、`dev` のプレリリースを有効にする。初回パッチ後に署名鍵をエクスポート（設定 → 署名鍵 → エクスポート）。
+1. ユーザーに実機で試してもらう: Morphe Manager の「パッチソース → リモート」に `https://github.com/yak9909/FilesPlus` を追加し、`dev` のプレリリースを有効にする。初回パッチ後に署名鍵をエクスポート（設定 → 署名鍵 → エクスポート）。
 2. 診断画面（Mod 設定 → 診断 →「テキストで共有」）の内容をもらい、2K/4K が再生できない原因を確定する（`docs/HIGH_RESOLUTION_PLAYBACK.md`）。
 3. ワーカー1つで「全パッチを元の APK にまとめて当てる検証ツール」（`scripts/` に置く）を作る候補。worker が `build/` に残した検証用の Java（`build/VerifyModKit.java` など）が参考になる。
 4. 未対応の小物: 「媒体の能力を超えても再生を試す」（`media.tryExceedCapabilities`、既定 ON）は Mod 設定の画面に切り替えがまだない。
