@@ -140,3 +140,5 @@ local.properties
 *.xapk
 original/
 analysis/
+worker-logs/
+build/
