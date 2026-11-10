@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Start or resume a Codex worker session (persistent, not ephemeral).
 #   start : scripts/codex-worker.sh start  <name> <model> <effort> <prompt-file> [workdir]
-#   resume: scripts/codex-worker.sh resume <name> <session-id> <prompt-file>
+#   resume: scripts/codex-worker.sh resume <name> <session-id> <prompt-file> [workdir]
+#   (resume has no -C; it runs in workdir, default E:/Projects/ModdedFiles-wt/<name> if it exists)
 # Logs: worker-logs/<name>.log, last reply: worker-logs/<name>.last.md (git-ignored).
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -21,7 +22,9 @@ if [ "$mode" = start ]; then
   codex exec -m "$model" -c model_reasoning_effort="$effort" "${CFG[@]}" --color never -C "$wd" \
     -o "$LOGDIR/$name.last.md" - < "$prompt" > "$LOGDIR/$name.log" 2>&1
 else
-  sid=$3; prompt=$4
+  sid=$3; prompt=$(cd "$(dirname "$4")" && pwd)/$(basename "$4")
+  wd=${5:-$ROOT/../ModdedFiles-wt/$name}; [ -d "$wd" ] || wd=$ROOT
+  cd "$wd" || exit 1
   codex exec resume "${CFG[@]}" "$sid" -o "$LOGDIR/$name.last.md" - < "$prompt" >> "$LOGDIR/$name.log" 2>&1
 fi
 echo "exit=$? session=$(grep -m1 -oiE 'session id: *[0-9a-f-]+' "$LOGDIR/$name.log" | awk '{print $NF}')"

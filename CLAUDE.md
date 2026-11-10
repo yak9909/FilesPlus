@@ -40,6 +40,7 @@ Rules:
 - **When starting work that does not need the previous worker context, start a new session; if the old session is no longer needed, delete it** with `codex delete <SESSION_ID>`.
 - Track active worker sessions in `docs/WORKERS.md` (id, model, purpose, status) so they survive `/clear`.
 - Claude reviews every worker result (build + diff review) before committing.
+- **Run at most 1 worker at a time** (the user's PC gets slow). 2 in parallel only when really needed. Never 3+.
 
 ## Notes that must survive /clear
 - Memory files may be lost when the session is cleared, so anything important lives here or in `docs/`.
