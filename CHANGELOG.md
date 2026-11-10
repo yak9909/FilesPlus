@@ -1,3 +1,9 @@
+## [1.0.0-dev.2](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.1...v1.0.0-dev.2) (2026-11-10)
+
+### ✨ New Features
+
+* Rename project to FilesPlus ([4c42152](https://github.com/yak9909/FilesPlus/commit/4c4215235018b3a9a1d8bf6745fe6fa9ff8d7411))
+
 ## 1.0.0-dev.1 (2026-11-10)
 
 ### ✨ New Features
