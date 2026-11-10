@@ -20,7 +20,7 @@ Design (Japanese) is in `docs/DESIGN.md`; your task prompt quotes the parts you 
     do it from smali in the patch, or pass plain values (int/long/String/View/Context) across the boundary.
 
 ## Finding code in the app
-- Decompiled app: `analysis/jadx/sources/` (Java, read-only); resources/manifest: `analysis/apktool/`.
+- Decompiled app: `E:/Projects/ModdedFiles/analysis/jadx/sources/` (Java, read-only); resources/manifest: `E:/Projects/ModdedFiles/analysis/apktool/`.
 - Obfuscated names (e.g. `defpackage.kwd`) are only valid for this version. **Fingerprints must not use obfuscated
   class/method names.** Use strings, resource IDs/literals, unobfuscated classes (`com.google.android.apps.nbu.files.*`
   view/activity classes), Android API calls, opcodes and parameter shapes.
