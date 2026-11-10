@@ -1,48 +1,27 @@
-# 引き継ぎメモ（最終更新: 2026-11-11 04:25）
+# 引き継ぎメモ（最終更新: 2026-11-11 08:30）
 
 /clear のあとに作業を再開するためのメモ。まず `CLAUDE.md`（運用ルール）と `docs/WORKERS.md`（ワーカーのセッション）を読むこと。
 
 ## 現在の状況
-- 設計は完了（`docs/DESIGN.md` v0.6）。実装は **Phase 0〜1** の途中。
-- ブランチ: `dev`（最新の土台）。GitHub: https://github.com/yak9909/ModdedFiles 。まだリリースなし（`chore:` のみのため）。
-- ローカルビルド: `bash scripts/build.sh`（JDK 21、Android SDK は `%LOCALAPPDATA%\Android\Sdk`、`gh` トークンに `read:packages` 付与済み）。
-- `dev` にあるもの: Files の Compatibility 定義（`patches/.../shared/Constants.kt`）、extension の核（`ModKit` / `ModSettings` / `DiagLog`）、ワーカー用の説明書 `docs/WORKER_BRIEF.md`、起動スクリプト `scripts/codex-worker.sh`。
+- 設計は `docs/DESIGN.md` v0.6。**Phase 0〜1 の実装が終わり、`dev` に統合済み**。
+- 最初のプレリリース **v1.0.0-dev.1** を公開済み（`patches-1.0.0-dev.1.mpp`）。
+  - 表示されるパッチ: Change package name / Custom skip duration / High-resolution playback（どれも既定で有効）。
+  - 隠しパッチ: ModKit 統合（`Files_Application.onCreate` で初期化し、Files の設定の「概要」の上に「Mod 設定」を追加。Mod 設定にはスキップ秒数と診断画面がある）。
+- 動作中のワーカーはなし。worktree とブランチ `w/*` は削除済み。
+- ローカルビルド: `bash scripts/build.sh`（失敗したら `--no-daemon` を付ける。理由は WORKERS.md）。
+- まだ確かめていないこと: 実機での動作全般。全パッチをまとめて元の APK に当てる確認はしていない（各パッチは単独で確認済み）。
 
-## 実行中だったワーカー（Codex、各自の git worktree）
-| 名前 | 内容 | worktree / ブランチ | セッション ID |
-|------|------|------|------|
-| pkg | パッケージ名変更パッチ | `E:/Projects/ModdedFiles-wt/pkg` / `w/pkg` | 01a1c6ce-7ec9-7ca3-974d-5d83535687af |
-| core | ModKit 初期化・Mod 設定・診断画面・設定画面の入口 | `.../core` / `w/core` | 01a1c6ce-87dc-75a1-b5d4-808fb4b5182b |
-| skip | スキップ秒数パッチ | `.../skip` / `w/skip` | 01a1c6d0-87e6-7a92-a72c-288fcc90899a |
-| media | 2K/4K 再生（L1）と再生エラーの診断記録 | `.../media` / `w/media` | 01a1c6d0-905d-7682-9630-9e16e0025970 |
-
-- 依頼文: `worker-logs/prompts/<名前>.md`、ログ: `worker-logs/<名前>.log`、最後の返答: `worker-logs/<名前>.last.md`。
-- **4つとも 04:20 頃に Codex の利用枠に達して途中で停止した**（リセットは **2026-11-11 07:40**）。セッション記録は4つとも残っており resume できる。途中までの変更は各 worktree に未コミットで残っている（`media` は `ModSettings.java` の変更と `docs/HIGH_RESOLUTION_PLAYBACK.md` も作成）。
-- 再開用の依頼文（英語）: `worker-logs/prompts/continue.md`。各ワーカーを次で再開する:
-  `bash scripts/codex-worker.sh resume <名前> <セッションID> worker-logs/prompts/continue.md`（4つ並行で background 実行してよい）
-
-## 再開手順
-1. 各ワーカーの状態を確認: `worker-logs/<名前>.last.md` があれば完了。なければログ末尾を見て、止まっていれば
-   `bash scripts/codex-worker.sh resume <名前> <セッションID> <プロンプトファイル>` で続きを依頼する
-   （例: 英語で "You were interrupted by a usage limit. Continue the task from where you stopped; build must pass; then give the final report." を書いたファイルを渡す）。
-2. 完了したワーカーの結果をレビュー（`git -C E:/Projects/ModdedFiles-wt/<名前> diff`、`bash scripts/build.sh` を worktree で実行）。
-3. 問題があれば同じセッションに英語で修正を依頼（resume）。問題なければ worktree でコミットし、`dev` にマージ。
-   - `skip` と `media` は `ModKitIntegrationPatch.kt` の仮スタブを作っている可能性がある → マージ時は `core` の実装を採用する。
-   - 統合後に `dev` でビルドを確認。
-4. 最初のリリース: 統合したら `feat:` コミットで push → GitHub Actions が `dev` のプレリリースを作る（`gh run list` / `gh release list`）。
-5. 不要になったワーカーセッションは `codex delete <ID>`、worktree は `git worktree remove`、ブランチは削除し、`docs/WORKERS.md` を更新。
-6. ユーザーへの案内: Morphe Manager の「パッチソース → リモート」に `https://github.com/yak9909/ModdedFiles` を追加し、`dev` のプレリリースを有効にして試してもらう。初回パッチ後に署名鍵をエクスポート（設定 → 署名鍵 → エクスポート）。診断画面の内容を共有してもらい、2K/4K の原因を確定する。
+## 次にやること
+1. ユーザーに実機で試してもらう: Morphe Manager の「パッチソース → リモート」に `https://github.com/yak9909/ModdedFiles` を追加し、`dev` のプレリリースを有効にする。初回パッチ後に署名鍵をエクスポート（設定 → 署名鍵 → エクスポート）。
+2. 診断画面（Mod 設定 → 診断 →「テキストで共有」）の内容をもらい、2K/4K が再生できない原因を確定する（`docs/HIGH_RESOLUTION_PLAYBACK.md`）。
+3. ワーカー1つで「全パッチを元の APK にまとめて当てる検証ツール」（`scripts/` に置く）を作る候補。worker が `build/` に残した検証用の Java（`build/VerifyModKit.java` など）が参考になる。
+4. 未対応の小物: 「媒体の能力を超えても再生を試す」（`media.tryExceedCapabilities`、既定 ON）は Mod 設定の画面に切り替えがまだない。
 
 ## このあとの実装順（DESIGN.md §7）
 - Phase 2: 共通基盤（VFS / FileOps / JobQueue / History）、フォルダタブ共通部品（§5.7）、フォルダごと削除（§5.8）、空フォルダのタブ表示（§5.9）、現在のタブへ移動（§5.10）
 - Phase 3: プレビュー中の複数選択（§5.2）、移動キュー（§5.4）
 - Phase 4: SMB（ブラウザ・provider・サムネイルキャッシュ・接続先保存、§5.3）
 - Phase 5〜6: 再生エンジン抽象化・L4・GIF シーク・その他形式
-
-## 再開の予約
-- CronCreate で **2026-11-11 07:43 に1回だけ**再開する予約（ジョブ ID `2e23f7a6`）を入れてある。内容は「HANDOFF.md・CLAUDE.md・WORKERS.md を読み、再開手順に従って作業を再開」。
-- この予約は **/clear では消えない**（ユーザー確認済み）。Claude を終了すると消えるので、その場合は手動で再開を依頼してもらう。
-- 予約の確認・取り消し: CronList / CronDelete。
 
 ## 注意
 - 作業フォルダの git で `error: daemon terminated` が出ることがある（fsmonitor）。無視してよいが、`git worktree add` が固まったら git プロセスを止めて作り直す。

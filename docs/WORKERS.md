@@ -1,14 +1,15 @@
 # Codex worker sessions
 
 Active Codex CLI sessions (see CLAUDE.md "Working with Codex CLI workers").
-Delete a session with `codex delete <id>` when its context is no longer needed, and remove its row.
+Delete a session with `codex delete --force <id>` when its context is no longer needed, and remove its row.
 
 | Session ID | Model / effort | Purpose | Status |
 |------------|----------------|---------|--------|
-| 01a1c6ce-7ec9-7ca3-974d-5d83535687af | gpt-6.1-sol / high | `pkg`: Change package name patch (worktree `../ModdedFiles-wt/pkg`, branch `w/pkg`) | resumed 2026-11-11 07:43 |
-| 01a1c6ce-87dc-75a1-b5d4-808fb4b5182b | gpt-6.1-sol / high | `core`: ModKit integration + Mod settings/diagnostics (`../ModdedFiles-wt/core`, `w/core`) | resumed 2026-11-11 07:43 |
-| 01a1c6d0-87e6-7a92-a72c-288fcc90899a | gpt-6.1-sol / medium | `skip`: Custom skip duration (`../ModdedFiles-wt/skip`, `w/skip`) | resumed 2026-11-11 07:43 |
-| 01a1c6d0-905d-7682-9630-9e16e0025970 | gpt-6.1-sol / xhigh | `media`: High-res playback L1 + diagnostics (`../ModdedFiles-wt/media`, `w/media`) | resumed 2026-11-11 07:43 |
+| (none) | | | |
 
 Launcher: `scripts/codex-worker.sh` (start/resume). Prompts and logs: `worker-logs/` (git-ignored).
-Parallel workers each use their own git worktree under `E:/Projects/ModdedFiles-wt/` to avoid build conflicts; Claude merges branches into `dev` after review.
+Run at most 1 worker at a time (2 only if needed). Workers each use their own git worktree under `E:/Projects/ModdedFiles-wt/` to avoid build conflicts; Claude merges branches into `dev` after review.
+
+Pitfalls:
+- `codex exec resume` has no `-C`; the launcher `cd`s into the worktree. Don't edit the launcher while a worker runs (bash re-reads it).
+- Workers leave Gradle daemons running as the sandbox user in the shared `~/.gradle`; if a local build fails with AccessDeniedException, use `bash scripts/build.sh --no-daemon`.
