@@ -1,3 +1,9 @@
+## [1.0.0-dev.5](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.4...v1.0.0-dev.5) (2026-11-11)
+
+### ✨ New Features
+
+* Optionally show empty folders as category tabs ([c7b0e88](https://github.com/yak9909/FilesPlus/commit/c7b0e88c7e7bb4b82a6848384cc5e470e377a5df))
+
 ## [1.0.0-dev.4](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.3...v1.0.0-dev.4) (2026-11-11)
 
 ### ✨ New Features

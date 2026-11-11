@@ -1,7 +1,7 @@
 {
-  "created_at": "2026-11-11T04:30:05",
-  "description": "## [1.0.0-dev.4](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.3...v1.0.0-dev.4) (2026-11-11)\n\n### ✨ New Features\n\n* Allow double-tap rewind near the start to go to the start ([70586c4](https://github.com/yak9909/FilesPlus/commit/70586c4c96783b4ff9cc732064a19dcf0a8cfbd7))\n* Delete the current folder from category tabs ([3db74df](https://github.com/yak9909/FilesPlus/commit/3db74df0b3128011fbca7af220762101812a8756))",
-  "download_url": "https://github.com/yak9909/FilesPlus/releases/download/v1.0.0-dev.4/patches-1.0.0-dev.4.mpp",
+  "created_at": "2026-11-11T09:50:40",
+  "description": "## [1.0.0-dev.5](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.4...v1.0.0-dev.5) (2026-11-11)\n\n### ✨ New Features\n\n* Optionally show empty folders as category tabs ([c7b0e88](https://github.com/yak9909/FilesPlus/commit/c7b0e88c7e7bb4b82a6848384cc5e470e377a5df))",
+  "download_url": "https://github.com/yak9909/FilesPlus/releases/download/v1.0.0-dev.5/patches-1.0.0-dev.5.mpp",
   "signature_download_url": "",
-  "version": "1.0.0-dev.4"
+  "version": "1.0.0-dev.5"
 }
