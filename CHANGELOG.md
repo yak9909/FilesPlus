@@ -1,3 +1,9 @@
+## [1.0.0-dev.12](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.11...v1.0.0-dev.12) (2026-11-11)
+
+### 🐛 Bug Fixes
+
+* Run folder tab hooks after the original method instead of before return-void ([4f53e67](https://github.com/yak9909/FilesPlus/commit/4f53e674b39ed03dfd19ed3d851b1236bf1d23a2))
+
 ## [1.0.0-dev.11](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.10...v1.0.0-dev.11) (2026-11-11)
 
 ### ✨ New Features
