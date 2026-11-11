@@ -1,3 +1,9 @@
+## [1.0.0-dev.15](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.14...v1.0.0-dev.15) (2026-11-11)
+
+### 🐛 Bug Fixes
+
+* Move files by reserving the target name and renaming, never copy and delete ([d44d730](https://github.com/yak9909/FilesPlus/commit/d44d7304b009301199d06362572b2945e3cccf25))
+
 ## [1.0.0-dev.14](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.13...v1.0.0-dev.14) (2026-11-11)
 
 ### ✨ New Features
