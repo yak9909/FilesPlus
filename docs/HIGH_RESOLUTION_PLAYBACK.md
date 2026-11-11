@@ -61,6 +61,13 @@ Observed with a 1596 x 1996 AVC video (24 fps, 9.9 Mbps):
 - Fallback also applies to audio decoders (harmless; log line "candidates=[c2.android.aac.decoder]").
 - Log wording to fix: audio formats are logged as "Video input".
 
+Result: the 1596 x 1996 video **played fine** (user confirmed).
+
+Observed with a 3840 x 2160 AVC video (High@5.1 `avc1.640033`, 30 fps, 28.6 Mbps):
+- Same path: both `c2.qti.avc.*` fail in `configure`, then `c2.android.avc.decoder` initializes even though it advertises max 2048 x 2048 (the advertised limit is not enforced).
+- It plays, but **stutters** (software decode too slow for 4K30 on Snapdragon 480).
+- VLC for Android plays the same file **without stutter** -> a solution exists. Most likely VLC decodes with its own multi-threaded FFmpeg (libavcodec, possibly skipping the H.264 loop filter). To be confirmed by the user with VLC's hardware acceleration set to "Disabled".
+
 Consequences for the plan (DESIGN §5.5):
 - 2K AVC whose sides are <= 2048 (e.g. 2048x1080, portrait ~1600x2000): L1 + L2 (software AVC) is the path. Smoothness still to be confirmed by the user.
 - 2560x1440 and 4K: no platform decoder can open them. Needs L4 (keyframe-only via a bundled decoder) or L3 (transcode), i.e. a bundled decoder (FFmpeg / dav1d) -> Phase 5-6.
