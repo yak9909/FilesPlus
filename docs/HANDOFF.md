@@ -1,4 +1,4 @@
-# 引き継ぎメモ（最終更新: 2026-11-11 13:10）
+# 引き継ぎメモ（最終更新: 2026-11-11 13:40）
 
 /clear のあとに作業を再開するためのメモ。まず `CLAUDE.md`（運用ルール）と `docs/WORKERS.md`（ワーカーのセッション）を読むこと。
 
@@ -12,22 +12,12 @@
 - ローカルビルド: `bash scripts/build.sh --no-daemon`（ワーカーが残した Gradle デーモンのせいで AccessDenied になるため。WORKERS.md 参照）。
 
 ## ワーカー（Codex）の状態
-- **Codex の利用枠は 0**。リセットは **2026-11-11 12:44**（Codex のエラー文 "try again at 12:44 PM" で確認）。それまでワーカーは使えない。
-- `tabs` ワーカー（セッション `01a1c8a6-b6d8-72a3-b155-9b8db5ce9f57`、gpt-6.1-sol / high）: フォルダタブの共通部品＋フォルダごと削除（§5.7・§5.8）。**起動直後に利用枠で止まり、まだ何も実装していない**。
-  - worktree `E:/Projects/ModdedFiles-wt/tabs`（ブランチ `w/tabs`、dev の 85bc962 から作成。dev より少し古いが、マージで問題ない）。
-  - 依頼文 `worker-logs/prompts/tabs.md`。再開は**最初の依頼文をもう一度渡す**:
-    `bash scripts/codex-worker.sh resume tabs 01a1c8a6-b6d8-72a3-b155-9b8db5ce9f57 worker-logs/prompts/tabs.md`（background で実行）
+- Codex の利用枠は 2026-11-11 12:44 に回復済み。
+- `tabs` ワーカー（セッション `01a1c8a6-b6d8-72a3-b155-9b8db5ce9f57`、gpt-6.1-sol / high）: §5.7・§5.8 を実装済み（`dev` に統合済み）。**待機中**。§5.9・§5.10 も同じタブ画面のフックを使うので、このセッションを続けて使う（`codex exec resume`）。使う前に worktree `E:/Projects/ModdedFiles-wt/tabs` で `git merge dev` する。
 - ワーカーは**同時に1つまで**（ユーザーの PC が重くなるため。必要なときだけ2つ）。
 
-## 再開の予約
-- CronCreate で **2026-11-11 12:47 に1回だけ**「HANDOFF.md・CLAUDE.md・WORKERS.md を読んで作業を再開」する予約を入れてある（ジョブ ID `9a774ecc`）。
-- この予約は **/clear では消えない**（ユーザー確認済み）。**Claude を終了すると消える**ので、その場合はユーザーに手動で再開を頼んでもらう。
-- 確認・取り消し: CronList / CronDelete。
-
 ## 再開したらやること（順番）
-1. ~~`tabs` ワーカーを再開~~ → 12:47 に再開済み（実行中なら完了通知を待つ。止まっていたら同じコマンドで再開）。
-2. ~~巻き戻しオプション~~ → 実装済み・`dev` にコミット済み（70586c4、未 push）。元 APK に当てて `jpw.b` の差し替えを確認済み（ハーネス: `build/verify/`、README あり）。
-3. `tabs` が終わったらレビュー → worktree でコミット → `dev` にマージ → `bash scripts/build.sh --no-daemon` → push（`feat:` ならプレリリースが出る）→ ユーザーに日本語で報告。
+1〜3. 完了（2026-11-11）: 巻き戻しオプション（70586c4）と tabs（フォルダごと削除、3db74df）を `dev` に統合して push。元 APK に全パッチをまとめて当てられることを `build/verify/` のハーネスで確認済み。**実機確認はまだ**（ユーザーに依頼中: 先頭付近のダブルタップ巻き戻し、カテゴリのタブ画面の︙ →「このフォルダを削除」）。
 4. Phase 2 の残り（1つずつ）: 空のフォルダのタブ表示（§5.9）→ 現在のタブへ移動（§5.10）。
 5. その後: 全パッチをまとめて元の APK に当てる検証ツール（worker が `build/` に残した `VerifyModKit.java` などが参考）、Phase 5 の libVLC エンジン（APK にネイティブライブラリを足せるかの調査、32bit 版 APK で間に合うか。診断の「アプリの ABI」を見る）。
 
