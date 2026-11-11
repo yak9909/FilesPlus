@@ -1,3 +1,9 @@
+## [1.0.0-dev.3](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.2...v1.0.0-dev.3) (2026-11-11)
+
+### 🐛 Bug Fixes
+
+* Show app ABI in diagnostics and label audio tracks correctly ([3216e4b](https://github.com/yak9909/FilesPlus/commit/3216e4b6247f69cb477078880cf23b5381c61154))
+
 ## [1.0.0-dev.2](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.1...v1.0.0-dev.2) (2026-11-10)
 
 ### ✨ New Features
