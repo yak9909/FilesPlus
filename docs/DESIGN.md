@@ -324,6 +324,15 @@ class MoveQueue(jobs: JobQueue, ops: FileOps) { // §5.4・§5.10 で共通
 ```
 - プレビューのページ一覧からは、移動したファイルを外す（元アプリのギャラリーのアダプタに通知するフックが必要。§9）。
 
+**調査結果（2026-11-12、versionCode 2081362。難読化名は目印だけ）**
+- 元アプリの「移動／コピー」: `move_to_action` / `copy_to_action` は ギャラリー fragment（`jju.aI`）で処理される。移動先の選択は `AdvancedBrowsingPickerActivity`（manifest で exported=false、リクエストは protobuf の Parcelable）なので、**拡張側から開けない／再利用しない**。移動先は自前の簡易フォルダブラウザで選ぶ。結果は Intent extra `"ADVANCED_BROWSING_PICKER_RESULT"`（proto `jce`、移動先 `kqg`、操作 1=コピー・2=移動）。実行は `jkt.s(jmq, Z)`（文字列 "Index for selected file is invalid" で見つかる）。
+- 履歴の記録: `jkt.s` をフックして `jmq.c`（`kqg`）と操作（移動のみ）を拡張へ渡せる。`kqg` の文字列フィールド（URI か絶対パス）を反射で読む。SD カードの形式は未確認なので、読めなければ記録しない（best-effort）。
+- ページ一覧から外す: `jkt.l()`（文字列 "removeCurrentAndMoveToNextFile with only 1 file." / "...from an invalid position item."）が、今のエントリを外して次へ進む（`D()` がアダプタ更新と `setCurrentItem`、`m()` がメニュー再生成）。呼ぶ前に `jkt.C = jkt.B` が必要（`B`/`C` は `c()`/`d(I)` が読む int フィールド）。1件しかないときは何もしない → Activity を閉じる。20件以上で読み込み済みが20件未満だと `B(...)` が MediaStore を再読み込みするので、移動前に外すだけでは消えたファイルが再び現れる場合がある（移動と MediaStore 同期が済むまで）。複数選択の移動後は `jkt.B(max(0,B-50), true)` で再読み込みする（元アプリも移動後に同じことをする）。
+- 再生中の判定: 元アプリのプレイヤー状態（`jpx.R`）には触れない。**今のページの MediaStore id と同じで MIME が video/・audio/ のジョブは待たせ**、`onPageSelected` が別の id を報告したとき、またはプレビューが閉じたときに実行する。
+- UI: `BottomSheetDialog` は R8 で消えている。**素の `Dialog`（下寄せ、角丸の GradientDrawable、一覧は拡張側で組む）**で作る。結果は Toast（元に戻すは後回し）。
+- キューのスレッドは Activity より長生きさせる（ModKit 側に持つ）。`TabMove` は `app.filesplus.extension` の共有クラスにするか public にして再利用する。
+- 分割: ①`DestinationHistory` と `MoveQueue`（UI なし）→ ②下寄せシートと簡易フォルダブラウザ＋メニュー項目 → ③ページ一覧から外す → ④（任意）元アプリの移動からの履歴記録とクイック送り。
+
 ### 5.5 解像度が大きい動画の再生（解像度を落として再生）
 **前提（技術的な制約）**: 動画は**元の解像度でデコードしてから**縮小して表示するもので、デコード前に解像度を落とすことはできない。「再生できない」原因は次のどれかで、それぞれ対策が違う。
 
