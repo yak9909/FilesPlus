@@ -3,9 +3,14 @@ package app.filesplus.extension.preview;
 import android.app.Activity;
 import android.content.Context;
 import android.content.ContextWrapper;
+import android.database.Cursor;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.net.Uri;
+import android.os.Handler;
+import android.os.Looper;
+import android.provider.MediaStore;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
@@ -14,10 +19,20 @@ import android.view.ViewTreeObserver;
 import android.view.WindowInsets;
 import android.widget.Toast;
 
+import android.webkit.MimeTypeMap;
+
+import java.io.File;
 import java.lang.ref.WeakReference;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Locale;
+import java.util.Map;
 
 import app.filesplus.extension.DiagLog;
 import app.filesplus.extension.ModKit;
+import app.filesplus.extension.move.DestinationSheet;
+import app.filesplus.extension.move.MoveQueue;
 
 /**
  * Entry points called from the smali bridges of the "Multi-select in preview" patch.
@@ -29,9 +44,12 @@ public final class PreviewHooks {
     // Fixed ids (no app resources); "PS1" / "PS2" in ASCII.
     private static final int SELECT_ITEM = 0x7e505331;
     private static final int COUNT_ITEM = 0x7e505332;
+    private static final int MOVE_ITEM = 0x7e505333; // "PS3"
 
     /** The last gallery root that was shown, to clear its check mark when the store is handed over. */
     private static WeakReference<View> lastRoot;
+    /** MediaStore id of the file on the current page (0 = none); tracked for the move queue. */
+    private static volatile long currentId;
 
     private PreviewHooks() {}
 
@@ -54,6 +72,12 @@ public final class PreviewHooks {
                         ? (ja ? "選択を解除" : "Deselect") : (ja ? "選択" : "Select");
                 menu.add(Menu.NONE, SELECT_ITEM, Menu.NONE, title).setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
             }
+            if (hasId && menu.findItem(MOVE_ITEM) == null) {
+                menu.add(Menu.NONE, MOVE_ITEM, Menu.NONE, ja ? "移動先へ送る…" : "Send to…")
+                        .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
+            }
+            // The first page is shown without a page-change callback, so the menu also syncs the move queue.
+            notePage(id, hasId);
             int count = SelectionStore.count();
             if (count > 0 && menu.findItem(COUNT_ITEM) == null) {
                 String title = ja ? "選択中 " + count + " 件" : count + " selected";
@@ -67,8 +91,15 @@ public final class PreviewHooks {
     /** Called when the gallery pager settles on another file: moves the check mark with it. */
     public static void onPageSelected(View galleryRoot, long id, boolean hasId) {
         try {
+            notePage(id, hasId);
             updateOverlay(galleryRoot, id, hasId);
         } catch (Throwable t) { hookError(t); }
+    }
+
+    /** Remembers the current page and lets the move queue release held jobs of files that are no longer shown. */
+    private static void notePage(long id, boolean hasId) {
+        currentId = hasId ? id : 0L;
+        MoveQueue.onPageChanged(currentId);
     }
 
     /**
@@ -87,7 +118,7 @@ public final class PreviewHooks {
 
     /** Cheap pre-check so the bridge only reads the current file for our own items. */
     public static boolean handles(int itemId) {
-        return itemId == SELECT_ITEM || itemId == COUNT_ITEM;
+        return itemId == SELECT_ITEM || itemId == COUNT_ITEM || itemId == MOVE_ITEM;
     }
 
     /** Returns true when the click was one of our items and has been handled. */
@@ -95,6 +126,10 @@ public final class PreviewHooks {
         try {
             if (!handles(itemId)) return false;
             Context context = root != null ? root.getContext() : ModKit.context();
+            if (itemId == MOVE_ITEM) {
+                openMoveSheet(activity(context), id, hasId);
+                return true;
+            }
             if (itemId == SELECT_ITEM) {
                 if (hasId) {
                     boolean selected = SelectionStore.toggle(id, entry);
@@ -119,6 +154,96 @@ public final class PreviewHooks {
             hookError(t);
             return false;
         }
+    }
+
+    /** "Send to…": asks for a destination, then queues the preview selection, or else the current file. */
+    private static void openMoveSheet(Activity activity, long id, boolean hasId) {
+        if (activity == null) {
+            DiagLog.e(AREA, "Send to: no Activity for the sheet", null);
+            return;
+        }
+        int selected = SelectionStore.count();
+        if (selected == 0 && !hasId) return;
+        DestinationSheet.show(activity, selected, folder -> {
+            try {
+                boolean fromSelection = SelectionStore.count() > 0;
+                long[] ids = fromSelection ? SelectionStore.ids() : (hasId ? new long[]{id} : new long[0]);
+                if (ids.length == 0) return;
+                if (fromSelection) {
+                    SelectionStore.clear();
+                    onStoreDrained(); // drop the check mark and the "Deselect" / "n selected" items
+                }
+                queueMove(ids, folder);
+            } catch (Throwable t) { hookError(t); }
+        });
+    }
+
+    /**
+     * Looks up the real MIME types off the main thread, then queues on the main thread so the queue sees the
+     * page that is current at that moment (or a closed preview).
+     */
+    private static void queueMove(long[] ids, File folder) {
+        Context app = ModKit.context();
+        if (app == null) {
+            DiagLog.e(AREA, "Send to: no application context", null);
+            return;
+        }
+        Handler main = new Handler(Looper.getMainLooper());
+        new Thread(() -> {
+            String[] mimes;
+            try {
+                mimes = mimesOf(app, ids);
+            } catch (Throwable t) {
+                hookError(t);
+                mimes = new String[ids.length];
+                Arrays.fill(mimes, UNKNOWN_MIME);
+            }
+            String[] result = mimes;
+            main.post(() -> {
+                try {
+                    // Keep the "never move what is playing" rule: tell the queue which page is current right now.
+                    if (ListHandoff.previewClosing()) MoveQueue.onPreviewClosed();
+                    else MoveQueue.onPageChanged(currentId);
+                    MoveQueue.enqueue(app, ids, result, folder);
+                } catch (Throwable t) { hookError(t); }
+            });
+        }, "filesplus-move-mime").start();
+    }
+
+    /** Treated like video by the queue (held while its page is open): used when the type cannot be determined. */
+    private static final String UNKNOWN_MIME = "video/unknown";
+
+    /** MediaStore MIME types in the order of {@code ids}; unknown or generic ones fall back to the file extension. */
+    private static String[] mimesOf(Context context, long[] ids) {
+        Map<Long, String> known = new HashMap<>();
+        Uri files = MediaStore.Files.getContentUri("external");
+        for (int from = 0; from < ids.length; from += 400) {
+            int to = Math.min(ids.length, from + 400);
+            String[] args = new String[to - from];
+            for (int i = from; i < to; i++) args[i - from] = Long.toString(ids[i]);
+            String selection = "_id IN (" + String.join(",", Collections.nCopies(args.length, "?")) + ")";
+            try (Cursor cursor = context.getContentResolver().query(files,
+                    new String[]{"_id", "mime_type", "_data"}, selection, args, null)) {
+                if (cursor == null) continue;
+                while (cursor.moveToNext()) {
+                    String mime = cursor.getString(1);
+                    if (mime == null || mime.isEmpty() || "application/octet-stream".equals(mime)) {
+                        String path = cursor.getString(2);
+                        String extension = path == null ? "" : MimeTypeMap.getFileExtensionFromUrl(path.replace(" ", "%20"));
+                        String guessed = extension.isEmpty() ? null
+                                : MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension.toLowerCase(Locale.ROOT));
+                        mime = guessed != null ? guessed : UNKNOWN_MIME;
+                    }
+                    known.put(cursor.getLong(0), mime);
+                }
+            }
+        }
+        String[] mimes = new String[ids.length];
+        for (int i = 0; i < ids.length; i++) {
+            String mime = known.get(ids[i]);
+            mimes[i] = mime != null ? mime : UNKNOWN_MIME;
+        }
+        return mimes;
     }
 
     /**

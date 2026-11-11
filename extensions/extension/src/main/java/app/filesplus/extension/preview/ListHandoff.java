@@ -16,6 +16,8 @@ import java.util.List;
 
 import app.filesplus.extension.DiagLog;
 import app.filesplus.extension.ModKit;
+import app.filesplus.extension.move.DestinationSheet;
+import app.filesplus.extension.move.MoveQueue;
 
 /**
  * Hands the files collected in the preview over to the list screen's selection model.
@@ -81,10 +83,12 @@ public final class ListHandoff implements Application.ActivityLifecycleCallbacks
         if (activity == null) return;
         previewClass = activity.getClass();
         preview = new WeakReference<>(activity);
+        // A preview opened from outside has no list model, yet the move queue still needs the close callbacks.
+        install();
     }
 
     /** True when the preview instance we know of is finishing or gone (back / up pressed). */
-    private static boolean previewClosing() {
+    static boolean previewClosing() {
         Activity known = preview == null ? null : preview.get();
         return known == null || known.isFinishing() || known.isDestroyed();
     }
@@ -107,6 +111,8 @@ public final class ListHandoff implements Application.ActivityLifecycleCallbacks
     public void onActivityPreCreated(Activity activity, Bundle savedInstanceState) {
         try {
             current = new WeakReference<>(activity);
+            // A recreated preview (rotation) becomes the known instance at once, before its menu is built.
+            if (isPreview(activity)) preview = new WeakReference<>(activity);
         } catch (Throwable t) { PreviewHooks.hookError(t); }
     }
 
@@ -123,12 +129,28 @@ public final class ListHandoff implements Application.ActivityLifecycleCallbacks
     @Override
     public void onActivityDestroyed(Activity activity) {
         try {
+            DestinationSheet.dismissFor(activity);
+        } catch (Throwable t) { PreviewHooks.hookError(t); }
+        try {
             // Anything not handed over by the time the preview closes (e.g. it was opened from outside) is dropped.
             // Only the instance we last saw counts: an older preview going away must not clear a newer one's picks.
             Activity known = preview == null ? null : preview.get();
             if (activity == known && activity.isFinishing() && SelectionStore.count() > 0) {
                 DiagLog.i(AREA, "Preview closed, dropping " + SelectionStore.count() + " unclaimed selected files");
                 SelectionStore.clear();
+            }
+            if (activity == known) {
+                if (activity.isFinishing()) {
+                    MoveQueue.onPreviewClosed();
+                } else {
+                    // Destroyed without finishing: a rotation recreates the preview at once (and marks the new
+                    // instance as known), anything else means it is really gone. Decide after a short wait.
+                    new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                        try {
+                            if (previewClosing()) MoveQueue.onPreviewClosed();
+                        } catch (Throwable t) { PreviewHooks.hookError(t); }
+                    }, 2000);
+                }
             }
         } catch (Throwable t) { PreviewHooks.hookError(t); }
     }

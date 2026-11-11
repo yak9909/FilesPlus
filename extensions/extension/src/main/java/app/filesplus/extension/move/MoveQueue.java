@@ -3,6 +3,8 @@ package app.filesplus.extension.move;
 import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.Process;
+import android.webkit.MimeTypeMap;
 import android.widget.Toast;
 
 import app.filesplus.extension.DiagLog;
@@ -11,9 +13,14 @@ import app.filesplus.extension.foldertabs.TabMove;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -41,6 +48,7 @@ public final class MoveQueue {
         int moved;
         int skipped;
         int failed;
+        boolean destinationLogged;
 
         Batch(Context app, File destination, int pending) {
             this.app = app;
@@ -64,20 +72,26 @@ public final class MoveQueue {
     /** Queues one move job per id. Call {@link #onPageChanged} with the current id first. */
     public static void enqueue(Context app, long[] ids, String[] mimes, File destination) {
         try {
-            Context context = app != null ? app.getApplicationContext() : null;
-            if (context == null) context = app != null ? app : ModKit.context();
+            // Prefer the application context so no Activity is kept alive by a queued job.
+            Context context = ModKit.context();
+            if (context == null && app != null) context = app.getApplicationContext();
+            if (context == null) context = app;
             if (context == null || ids == null || ids.length == 0 || destination == null) return;
-            Batch batch = new Batch(context, destination, ids.length);
+            // One job per distinct id (first mime wins).
+            Map<Long, String> unique = new LinkedHashMap<>();
+            for (int i = 0; i < ids.length; i++) {
+                if (!unique.containsKey(ids[i])) unique.put(ids[i], mimes != null && i < mimes.length ? mimes[i] : null);
+            }
+            Batch batch = new Batch(context, destination, unique.size());
             List<Job> now = new ArrayList<>();
             synchronized (LOCK) {
-                for (int i = 0; i < ids.length; i++) {
-                    String mime = mimes != null && i < mimes.length ? mimes[i] : null;
-                    Job job = new Job(batch, ids[i], mime);
+                for (Map.Entry<Long, String> entry : unique.entrySet()) {
+                    Job job = new Job(batch, entry.getKey(), entry.getValue());
                     if (isDeferrable(job) && job.id == currentId) deferred.add(job);
                     else now.add(job);
                 }
             }
-            DiagLog.i(AREA, "Enqueued " + ids.length + " item(s) to " + destination);
+            DiagLog.i(AREA, "Enqueued " + unique.size() + " item(s) to " + destination);
             for (Job job : now) submit(job);
         } catch (Throwable t) {
             DiagLog.e(AREA, "enqueue failed", t);
@@ -121,8 +135,16 @@ public final class MoveQueue {
 
     private static boolean isDeferrable(Job job) {
         String mime = job.mime;
-        return mime != null && (mime.startsWith("video/") || mime.startsWith("audio/"));
+        if (mime == null) return false;
+        if (mime.startsWith("video/") || mime.startsWith("audio/")) return true;
+        // Odd types such as application/ogg: decide by the extension the type stands for.
+        String extension = MimeTypeMap.getSingleton().getExtensionFromMimeType(mime);
+        return extension != null && MEDIA_EXTENSIONS.contains(extension.toLowerCase(Locale.ROOT));
     }
+
+    private static final Set<String> MEDIA_EXTENSIONS = new HashSet<>(Arrays.asList(
+            "mp4", "mkv", "webm", "avi", "mov", "3gp", "m4v", "mp3", "m4a", "aac", "ogg", "oga", "ogv", "opus",
+            "flac", "wav", "ts"));
 
     private static void submit(Job job) {
         try {
@@ -136,7 +158,14 @@ public final class MoveQueue {
     private static ExecutorService executor() {
         synchronized (LOCK) {
             if (executor == null) {
-                executor = Executors.newSingleThreadExecutor(r -> new Thread(r, "filesplus-move-queue"));
+                executor = Executors.newSingleThreadExecutor(r -> new Thread(() -> {
+                    try {
+                        Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND);
+                    } catch (Throwable ignored) {
+                        // Priority is best effort.
+                    }
+                    r.run();
+                }, "filesplus-move-queue"));
             }
             return executor;
         }
@@ -147,7 +176,12 @@ public final class MoveQueue {
         try {
             File destination = job.batch.destination;
             if (!destination.isDirectory() || !destination.canWrite()) {
-                DiagLog.e(AREA, "Destination unusable: " + destination, null);
+                boolean first;
+                synchronized (job.batch) {
+                    first = !job.batch.destinationLogged;
+                    job.batch.destinationLogged = true;
+                }
+                if (first) DiagLog.e(AREA, "Destination unusable: " + destination, null);
                 failed = 1;
             } else {
                 List<String> paths = TabMove.pathsOf(job.batch.app, new long[]{job.id});
@@ -195,6 +229,20 @@ public final class MoveQueue {
         boolean ja = "ja".equals(Locale.getDefault().getLanguage());
         String folder = destination.getName().isEmpty() ? destination.getPath() : destination.getName();
         StringBuilder sb = new StringBuilder();
+        if (moved == 0 && failed == 0 && skipped > 0) {
+            return ja ? "すでにそのフォルダにあります" : "Already in this folder";
+        }
+        if (moved == 0 && failed > 0) {
+            // Everything failed: lead with the failure instead of "Moved 0 items".
+            if (ja) {
+                sb.append("移動できませんでした（").append(failed).append(" 件）");
+                if (skipped > 0) sb.append("（").append(skipped).append(" 件は同じフォルダのためスキップ）");
+            } else {
+                sb.append("Could not move ").append(failed).append(failed == 1 ? " item" : " items");
+                if (skipped > 0) sb.append(" (").append(skipped).append(" skipped: same folder)");
+            }
+            return sb.toString();
+        }
         if (ja) {
             sb.append(moved).append(" 件を \"").append(folder).append("\" に移動しました");
             if (skipped > 0) sb.append("（").append(skipped).append(" 件は同じフォルダのためスキップ）");

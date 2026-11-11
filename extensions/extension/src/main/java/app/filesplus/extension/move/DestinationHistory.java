@@ -71,6 +71,14 @@ public final class DestinationHistory {
             list.remove(path);
             if (pinned) list.add(path);
             write(KEY_PINNED, list);
+            if (!pinned) {
+                // Keep the folder visible: an unpinned entry goes to the front of the recent list.
+                List<String> recent = read(KEY_RECENT);
+                recent.remove(path);
+                recent.add(0, path);
+                while (recent.size() > MAX_RECENT) recent.remove(recent.size() - 1);
+                write(KEY_RECENT, recent);
+            }
         } catch (Throwable t) {
             DiagLog.e(AREA, "setPinned failed", t);
         }
@@ -87,7 +95,9 @@ public final class DestinationHistory {
 
     private static List<String> read(String key) {
         List<String> out = new ArrayList<>();
-        String raw = ModSettings.prefs().getString(key, "");
+        SharedPreferences prefs = ModSettings.prefs();
+        if (prefs == null) return out; // Before ModKit.init: nothing stored yet.
+        String raw = prefs.getString(key, "");
         if (raw == null || raw.isEmpty()) return out;
         for (String line : raw.split("\n")) {
             String p = normalize(line);
@@ -97,8 +107,8 @@ public final class DestinationHistory {
     }
 
     private static void write(String key, List<String> list) {
-        SharedPreferences.Editor editor = ModSettings.prefs().edit();
-        editor.putString(key, String.join("\n", list));
-        editor.apply();
+        SharedPreferences prefs = ModSettings.prefs();
+        if (prefs == null) return;
+        prefs.edit().putString(key, String.join("\n", list)).apply();
     }
 }

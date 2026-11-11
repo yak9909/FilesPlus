@@ -34,6 +34,14 @@ public final class SelectionStore {
         return SELECTED.size();
     }
 
+    /** MediaStore ids of the selected files in selection order. */
+    public static synchronized long[] ids() {
+        long[] ids = new long[SELECTED.size()];
+        int i = 0;
+        for (Long id : SELECTED.keySet()) ids[i++] = id;
+        return ids;
+    }
+
     /** Selected entries in selection order (a copy). */
     public static synchronized List<Object> entries() {
         return new ArrayList<>(SELECTED.values());
