@@ -1,6 +1,6 @@
 {
   "NOTE": "Do NOT manually edit this file. This file is automatically updated when semantic release (release.yml) runs. Manually editing this file can break your releases and break third party tools that use this file.",
-  "version": "1.0.0-dev.5",
+  "version": "1.0.0-dev.6",
   "patches": [
     {
       "name": "Change package name",
@@ -105,6 +105,33 @@
     {
       "name": "High-resolution playback",
       "description": "Try videos beyond reported decoder limits, enable decoder fallback, and log playback diagnostics.",
+      "default": true,
+      "category": null,
+      "compatiblePackages": [
+        {
+          "packageName": "com.google.android.apps.nbu.files",
+          "name": "Files by Google",
+          "description": null,
+          "apkFileType": "APKM",
+          "appIconColor": "#4484F4",
+          "signatures": null,
+          "formFactor": "MOBILE",
+          "targets": [
+            {
+              "version": "1.13157.1011540316.0-release",
+              "versionCodes": null,
+              "isExperimental": false,
+              "minSdk": null,
+              "description": null
+            }
+          ]
+        }
+      ],
+      "options": []
+    },
+    {
+      "name": "Move to current tab",
+      "description": "Add a selection-mode menu item that moves the selected files into the folder of the current category tab.",
       "default": true,
       "category": null,
       "compatiblePackages": [

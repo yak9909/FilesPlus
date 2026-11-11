@@ -1,3 +1,9 @@
+## [1.0.0-dev.6](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.5...v1.0.0-dev.6) (2026-11-11)
+
+### ✨ New Features
+
+* Move selected files to the current folder tab ([640b222](https://github.com/yak9909/FilesPlus/commit/640b222dffdc03dc21392fb32a4b41fe31b8c265))
+
 ## [1.0.0-dev.5](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.4...v1.0.0-dev.5) (2026-11-11)
 
 ### ✨ New Features
