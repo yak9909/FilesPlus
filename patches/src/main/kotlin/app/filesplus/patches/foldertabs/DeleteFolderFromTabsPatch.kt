@@ -277,7 +277,7 @@ internal val folderTabContextPatch = bytecodePatch {
 
 val deleteFolderFromTabsPatch = bytecodePatch(
     name = "Delete folder from tabs",
-    description = "Permanently delete the current folder from category tabs, with confirmation and protected folders.",
+    description = "Move the current folder to the FilesPlus trash (kept 30 days) from category tabs, with confirmation and protected folders.",
     default = true,
 ) {
     compatibleWith(Constants.COMPATIBILITY_FILES)

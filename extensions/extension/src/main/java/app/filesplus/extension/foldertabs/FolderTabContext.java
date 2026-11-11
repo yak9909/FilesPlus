@@ -6,7 +6,6 @@ import android.content.Context;
 import android.content.ContextWrapper;
 import android.content.SharedPreferences;
 import android.database.Cursor;
-import android.media.MediaScannerConnection;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
@@ -15,8 +14,6 @@ import android.os.Looper;
 import android.os.storage.StorageManager;
 import android.os.storage.StorageVolume;
 import android.provider.MediaStore;
-import android.text.Html;
-import android.text.TextUtils;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
@@ -510,6 +507,8 @@ public final class FolderTabContext {
         WORKER.execute(() -> {
             try {
                 final long[] census = countFiles(folder.toPath());
+                File volume = volumeRoot(activity, folder);
+                final String trashPath = volume == null ? null : FolderTrash.trashRoot(volume).getPath();
                 MAIN.post(() -> {
                     try {
                         if (activity.isFinishing() || activity.isDestroyed()) {
@@ -517,13 +516,12 @@ public final class FolderTabContext {
                             return;
                         }
                         new AlertDialog.Builder(activity)
-                                .setTitle(quantity(activity, "confirm_delete_folder_title", 1,
-                                        japanese(activity) ? "フォルダを完全に削除しますか？" : "Delete folder permanently?"))
-                                .setMessage(folder.getAbsolutePath() + "\n\n" + confirmation(activity, census[0], census[1]))
+                                .setTitle(japanese(activity) ? "フォルダをゴミ箱へ移動しますか？" : "Move folder to trash?")
+                                .setMessage(folder.getAbsolutePath() + "\n\n" + confirmation(activity, census[0], census[1], trashPath))
                                 .setNegativeButton(string(activity, "cancel", japanese(activity) ? "キャンセル" : "Cancel"), null)
-                                .setPositiveButton(string(activity, "delete", japanese(activity) ? "削除" : "Delete"),
+                                .setPositiveButton(japanese(activity) ? "ゴミ箱へ移動" : "Move to trash",
                                         (dialog, which) -> {
-                                            try { delete(activity.getApplicationContext(), folder, key); }
+                                            try { trash(activity.getApplicationContext(), folder, key, census[0], census[1]); }
                                             catch (Throwable t) { busy = false; hookError(t); updateMenu(); }
                                         })
                                 .setOnDismissListener(dialog -> {
@@ -547,108 +545,77 @@ public final class FolderTabContext {
 
     private boolean deleting;
 
-    private void delete(Context context, File folder, String key) {
+    /**
+     * "Delete folder" is a single same-volume rename into the FilesPlus trash (DESIGN 10.6). Nothing is
+     * deleted and there is no copy fallback: when the rename fails the folder stays where it was.
+     */
+    private void trash(Context context, File folder, String key, long fileCount, long totalBytes) {
         deleting = true;
         WORKER.execute(() -> {
-            final long[] result = new long[3]; // Deleted entries, failed entries, MediaStore failures.
-            final List<String> deleted = new ArrayList<>();
             final int[] refused = {0}; // 0 = allowed, 1 = protected, 2 = changed or removed.
+            final FolderTrash.Result[] moved = {null};
+            final FolderTrash.Failure[] failure = {null};
             try {
-                // Recheck protection at delete time, not only when the menu item was shown; never follow
-                // directory symlinks, including the selected folder. Nothing is touched when it fails.
+                // Recheck protection at this point, not only when the menu item was shown; links are never followed.
                 refused[0] = deleteCheck(context, folder);
                 if (refused[0] != 0) {
                     throw new IOException((refused[0] == 1 ? "Protected folder" : "Folder changed or removed")
-                            + ", nothing deleted: " + folder);
+                            + ", nothing moved: " + folder);
                 }
-                deleteTree(context, folder, deleted, result);
+                File volume = volumeRoot(context, folder);
+                if (volume == null) throw new IOException("No storage volume for " + folder + ", nothing moved");
+                List<String> mediaPaths = FolderTrash.mediaPaths(context, folder);
+                moved[0] = FolderTrash.moveToTrash(folder, volume, fileCount, totalBytes);
+                FolderTrash.refreshMediaStore(context, folder, mediaPaths, moved[0].trashed);
+            } catch (FolderTrash.Failure f) {
+                failure[0] = f;
+                DiagLog.e(AREA, "Folder move to trash failed: " + folder, f);
             } catch (Throwable t) {
-                result[1]++;
-                DiagLog.e(AREA, "Folder deletion failed: " + folder, t);
+                DiagLog.e(AREA, "Folder move to trash failed: " + folder, t);
             } finally {
-                syncDeleted(context, deleted, result);
                 forgetDeletedFolders(context, folder);
             }
-            boolean success = !Files.exists(folder.toPath()) && result[1] == 0 && result[2] == 0;
-            String report = "Folder " + folder + ": deleted=" + result[0] + ", failed=" + result[1]
-                    + ", MediaStore failures=" + result[2];
-            if (success) DiagLog.i(AREA, report);
-            else DiagLog.e(AREA, report, null);
+            final boolean success = moved[0] != null;
+            if (success) DiagLog.i(AREA, "Folder " + folder + " moved to trash " + moved[0].trashed
+                    + " (files=" + fileCount + ", bytes=" + totalBytes + ")");
             MAIN.post(() -> {
                 try {
                     deleting = false;
                     busy = false;
-                    toast(context, success ? (japanese(context) ? "フォルダを削除しました" : "Folder deleted")
-                            : refused[0] == 1 ? (japanese(context) ? "保護されたフォルダのため削除しませんでした" : "Protected folder, not deleted")
-                            : refused[0] == 2 ? (japanese(context) ? "フォルダが変更または削除されたため、削除しませんでした" : "The folder changed or was removed, not deleted")
-                            : (japanese(context) ? "フォルダの削除を完了できませんでした" : "Could not completely delete the folder"));
-                    if (refused[0] == 0 || !folder.exists()) removedKey = key;
+                    boolean ja = japanese(context);
+                    String message;
+                    if (success) {
+                        message = ja ? "フォルダをゴミ箱へ移動しました（30 日間保管）\n" + moved[0].trashed.getPath()
+                                : "Folder moved to trash (kept 30 days):\n" + moved[0].trashed.getPath();
+                    } else if (refused[0] == 1) {
+                        message = ja ? "保護されたフォルダのため、ゴミ箱へ移動しませんでした" : "Protected folder, not moved to trash";
+                    } else if (refused[0] == 2) {
+                        message = ja ? "フォルダが変更または削除されたため、ゴミ箱へ移動しませんでした"
+                                : "The folder changed or was removed, not moved to trash";
+                    } else if (failure[0] != null && failure[0].crossVolume()) {
+                        message = ja ? "ゴミ箱と別のボリュームのため移動できませんでした。フォルダはそのままです"
+                                : "Cannot move across volumes. The folder was not changed";
+                    } else {
+                        message = ja ? "ゴミ箱へ移動できませんでした。フォルダはそのままです（詳しくは診断のログ）"
+                                : "Could not move the folder to trash. It was not changed (see the diagnostic log)";
+                    }
+                    toast(context, message);
+                    if (success || !folder.exists()) removedKey = key;
                     refresh();
                 } catch (Throwable t) { hookError(t); }
             });
         });
     }
 
-    private static void deleteTree(Context context, File folder, List<String> deleted, long[] result) throws IOException {
-        final Path boundary = folder.toPath().toAbsolutePath().normalize();
-        Files.walkFileTree(boundary, new SimpleFileVisitor<Path>() {
-            private void remove(Path path) {
-                try {
-                    // A link encountered as a file is removed itself; its target is never traversed.
-                    if (!path.equals(boundary) && !path.getParent().toRealPath().startsWith(boundary))
-                        throw new IOException("Folder ancestry changed: " + path);
-                    Files.delete(path);
-                    result[0]++;
-                    deleted.add(path.toString());
-                    if (deleted.size() >= 200) syncDeleted(context, deleted, result);
-                } catch (Throwable t) {
-                    result[1]++;
-                    DiagLog.e(AREA, "Failed to delete " + path, t);
-                }
-            }
-
-            @Override public FileVisitResult preVisitDirectory(Path path, BasicFileAttributes attrs) throws IOException {
-                if (!path.toRealPath().startsWith(boundary)) throw new IOException("Folder ancestry changed: " + path);
-                return FileVisitResult.CONTINUE;
-            }
-
-            @Override public FileVisitResult visitFile(Path path, BasicFileAttributes attrs) {
-                remove(path);
-                return FileVisitResult.CONTINUE;
-            }
-
-            @Override public FileVisitResult visitFileFailed(Path path, IOException error) {
-                result[1]++;
-                DiagLog.e(AREA, "Cannot access " + path, error);
-                return FileVisitResult.CONTINUE;
-            }
-
-            @Override public FileVisitResult postVisitDirectory(Path path, IOException error) {
-                if (error != null) {
-                    result[1]++;
-                    DiagLog.e(AREA, "Cannot enumerate " + path, error);
-                }
-                remove(path);
-                return FileVisitResult.CONTINUE;
-            }
-        });
-    }
-
-    private static void syncDeleted(Context context, List<String> paths, long[] result) {
-        if (paths.isEmpty()) return;
-        try {
-            String[] args = paths.toArray(new String[0]);
-            String placeholders = String.join(",", java.util.Collections.nCopies(args.length, "?"));
-            // Exact paths only: a partial filesystem failure must never delete surviving descendants.
-            context.getContentResolver().delete(FILES, "_data IN (" + placeholders + ")", args);
-        } catch (Throwable t) {
-            result[2]++;
-            DiagLog.e(AREA, "Failed to update MediaStore for deleted paths", t);
-            try { MediaScannerConnection.scanFile(context, paths.toArray(new String[0]), null, null); }
-            catch (Throwable error) { DiagLog.e(AREA, "Media scanner fallback failed", error); }
-        } finally {
-            paths.clear();
+    /** The storage volume root that contains {@code folder} (same canonical roots as the folder tabs). */
+    private static File volumeRoot(Context context, File folder) throws IOException {
+        File canonical = folder.getCanonicalFile();
+        File best = null;
+        for (File root : roots(context)) {
+            if (canonical.getPath().startsWith(root.getPath() + File.separator)
+                    && (best == null || root.getPath().length() > best.getPath().length())) best = root;
         }
+        return best;
     }
 
     /**
@@ -796,22 +763,21 @@ public final class FolderTabContext {
         }
     }
 
-    /** The count is exact (no "100+" cap); the total size is appended as its own line. */
-    private static CharSequence confirmation(Context context, long count, long bytes) {
-        String fallback = japanese(context)
-                ? "この操作は取り消せません。フォルダ内のすべてのファイル（" + count + " 件）も完全に削除されます。"
-                : "This is permanent and cannot be undone. All " + count
-                    + " files inside the folder will also be permanently deleted.";
-        String text;
-        if (count > 0) text = quantity(context, "confirm_delete_file_inside_folder_subtitle_new",
-                (int) Math.min(count, Integer.MAX_VALUE), fallback);
-        else text = string(context, "confirm_delete_subtitle_new", fallback);
+    /** The count is exact (no "100+" cap); the total size is its own line. Nothing is deleted: the folder is moved. */
+    private static CharSequence confirmation(Context context, long count, long bytes, String trashPath) {
+        boolean ja = japanese(context);
+        String where = trashPath == null ? "" : (ja ? "\n移動先: " : "\nMoves to: ") + trashPath + "/";
+        String text = ja
+                ? "フォルダとその中のファイル（" + count + " 件）をゴミ箱（FilesPlus）へ移動します。30 日間保管されます。"
+                    + "ファイルは削除されません。" + where
+                : "The folder and the " + count + " file" + (count == 1 ? "" : "s")
+                    + " inside it will be moved to the FilesPlus trash and kept for 30 days. "
+                    + "Nothing is deleted." + where;
         if (count > 0) {
-            String size = (japanese(context) ? "合計サイズ: " : "Total size: ")
+            text += "\n\n" + (ja ? "合計サイズ: " : "Total size: ")
                     + android.text.format.Formatter.formatFileSize(context, bytes);
-            text += "<br><br>" + TextUtils.htmlEncode(size);
         }
-        return Html.fromHtml(text, Html.FROM_HTML_MODE_LEGACY);
+        return text;
     }
 
     private static String string(Context context, String name, String fallback, Object... args) {
@@ -819,17 +785,12 @@ public final class FolderTabContext {
         return id == 0 ? fallback : context.getString(id, args);
     }
 
-    private static String quantity(Context context, String name, int count, String fallback) {
-        int id = context.getResources().getIdentifier(name, "plurals", context.getPackageName());
-        return id == 0 ? fallback : context.getResources().getQuantityString(id, count, count);
-    }
-
     private static boolean japanese(Context context) {
         return "ja".equals(context.getResources().getConfiguration().getLocales().get(0).getLanguage());
     }
 
     private static String title(Context context) {
-        return japanese(context) ? "このフォルダを削除" : "Delete this folder";
+        return japanese(context) ? "このフォルダをゴミ箱へ移動" : "Move this folder to trash";
     }
 
     private static Activity activity(Context context) {
