@@ -2,6 +2,8 @@ package app.filesplus.extension.settings;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.graphics.Color;
@@ -11,6 +13,7 @@ import android.media.MediaCodecList;
 import android.os.Build;
 import android.os.Bundle;
 import android.text.InputType;
+import android.text.method.PasswordTransformationMethod;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -25,6 +28,7 @@ import android.widget.Toast;
 import app.filesplus.extension.DiagLog;
 import app.filesplus.extension.ModKit;
 import app.filesplus.extension.ModSettings;
+import app.filesplus.extension.smb.SmbTester;
 import java.util.Collections;
 import java.util.List;
 
@@ -39,6 +43,7 @@ public final class ModSettingsActivity extends Activity {
     private String deviceReport = "";
     private String decoderReport = "";
     private Button shareButton;
+    private AlertDialog smbDialog;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -90,6 +95,21 @@ public final class ModSettingsActivity extends Activity {
     }
 
     @Override
+    protected void onDestroy() {
+        // Avoid leaked windows; the SMB test thread checks isDestroyed() before touching the UI.
+        if (smbDialog != null) smbDialog.dismiss();
+        smbDialog = null;
+        super.onDestroy();
+    }
+
+    /** Shows one SMB test dialog at a time and remembers it so onDestroy can dismiss it. */
+    private void showSmbDialog(AlertDialog dialog) {
+        if (smbDialog != null) smbDialog.dismiss();
+        smbDialog = dialog;
+        dialog.show();
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
         safely(this::refreshLog);
@@ -138,6 +158,7 @@ public final class ModSettingsActivity extends Activity {
         deviceReport = deviceReport();
         details(deviceReport);
         TextView codecs = details(tr("動画デコーダーを確認中…", "Checking video decoders…"));
+        addSmbTestRow();
         LinearLayout actions = new LinearLayout(this);
         actions.setPadding(dp(16), dp(8), dp(16), dp(8));
         shareButton = new Button(this);
@@ -175,6 +196,139 @@ public final class ModSettingsActivity extends Activity {
                 refreshLog();
             }));
         }, "ModKit-diagnostics").start();
+    }
+
+    private void addSmbTestRow() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.VERTICAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(24), dp(16), dp(24), dp(16));
+        row.setMinimumHeight(dp(72));
+        TypedValue background = new TypedValue();
+        if (getTheme().resolveAttribute(android.R.attr.selectableItemBackground, background, true)) {
+            row.setBackgroundResource(background.resourceId);
+        }
+        row.addView(text(tr("SMB テスト", "SMB test"), 16, primary));
+        row.addView(text(tr("接続・一覧・先頭 1 KB の読み取りを確かめます", "Checks connect, listing and a 1 KB read"), 14, secondary));
+        row.setFocusable(true);
+        row.setOnClickListener(v -> safely(this::showSmbTestDialog));
+        sections.addView(row);
+    }
+
+    private void showSmbTestDialog() {
+        LinearLayout form = new LinearLayout(this);
+        form.setOrientation(LinearLayout.VERTICAL);
+        form.setPadding(dp(24), dp(8), dp(24), 0);
+        int plain = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
+        EditText host = smbField(form, tr("ホスト（例: 192.168.0.10）", "Host (e.g. 192.168.0.10)"), plain | InputType.TYPE_TEXT_VARIATION_URI);
+        EditText port = smbField(form, tr("ポート", "Port"), InputType.TYPE_CLASS_NUMBER);
+        port.setText("445");
+        EditText user = smbField(form, tr("ユーザー（空欄でゲスト）", "User (blank for guest)"), plain);
+        EditText password = smbField(form, tr("パスワード", "Password"),
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        EditText domain = smbField(form, tr("ドメイン（任意）", "Domain (optional)"), plain);
+        EditText share = smbField(form, tr("共有名（必須）", "Share name (required)"), plain);
+        EditText path = smbField(form, tr("パス（任意。例: Videos/2024）", "Path (optional, e.g. Videos/2024)"), plain);
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(form);
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle(tr("SMB テスト", "SMB test")).setView(scroll)
+                .setPositiveButton(tr("実行", "Run"), null)
+                .setNegativeButton(tr("キャンセル", "Cancel"), null).create();
+        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener(v -> safely(() -> {
+                    String hostValue = host.getText().toString().trim();
+                    String shareValue = share.getText().toString().trim();
+                    int portValue;
+                    try {
+                        portValue = Integer.parseInt(port.getText().toString().trim());
+                    } catch (NumberFormatException e) {
+                        portValue = 0;
+                    }
+                    boolean valid = true;
+                    if (hostValue.isEmpty()) {
+                        host.setError(tr("ホストを入力してください", "Enter a host"));
+                        valid = false;
+                    }
+                    if (portValue < 1 || portValue > 65535) {
+                        port.setError(tr("1〜65535の整数を入力してください", "Enter a number from 1 to 65535"));
+                        valid = false;
+                    }
+                    if (shareValue.isEmpty()) {
+                        share.setError(tr("共有名を入力してください", "Enter a share name"));
+                        valid = false;
+                    }
+                    if (!valid) return;
+                    String userValue = user.getText().toString();
+                    String passwordValue = password.getText().toString();
+                    String domainValue = domain.getText().toString();
+                    String pathValue = path.getText().toString();
+                    dialog.dismiss();
+                    runSmbTest(hostValue, portValue, userValue, passwordValue, domainValue, shareValue, pathValue);
+                })));
+        showSmbDialog(dialog);
+    }
+
+    private EditText smbField(LinearLayout form, String hint, int inputType) {
+        EditText field = new EditText(this);
+        field.setHint(hint);
+        // setSingleLine replaces the transformation method, so it must run before setInputType and the
+        // password masking is applied explicitly afterwards.
+        field.setSingleLine(true);
+        field.setInputType(inputType);
+        if ((inputType & InputType.TYPE_MASK_VARIATION) == InputType.TYPE_TEXT_VARIATION_PASSWORD) {
+            field.setTransformationMethod(PasswordTransformationMethod.getInstance());
+        }
+        form.addView(field, new LinearLayout.LayoutParams(-1, -2));
+        return field;
+    }
+
+    private void runSmbTest(String host, int port, String user, String password, String domain, String share, String path) {
+        boolean[] abandoned = {false};
+        AlertDialog progress = new AlertDialog.Builder(this).setTitle(tr("SMB テスト", "SMB test"))
+                .setMessage(tr("接続中… 最大で 1 分ほどかかることがあります", "Connecting… this may take up to a minute"))
+                .setNegativeButton(tr("閉じる", "Close"), (d, which) -> abandoned[0] = true)
+                .setOnCancelListener(d -> abandoned[0] = true).create();
+        showSmbDialog(progress);
+        // Network I/O must stay off the UI thread.
+        new Thread(() -> {
+            String report;
+            try {
+                report = SmbTester.run(host, port, user, password, domain, share, path);
+            } catch (Throwable t) {
+                DiagLog.e("smb", "SMB test crashed", t);
+                report = "Error: " + t.getClass().getSimpleName();
+            }
+            final String result = report;
+            runOnUiThread(() -> safely(() -> {
+                if (abandoned[0] || isFinishing() || isDestroyed()) return;
+                progress.dismiss();
+                showSmbResult(result);
+                refreshLog();
+            }));
+        }, "ModKit-smb-test").start();
+    }
+
+    private void showSmbResult(String report) {
+        TextView body = text(report, 14, primary);
+        body.setTypeface(Typeface.MONOSPACE);
+        body.setTextIsSelectable(true);
+        body.setPadding(dp(24), dp(8), dp(24), dp(8));
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(body);
+        AlertDialog result = new AlertDialog.Builder(this).setTitle(tr("SMB テストの結果", "SMB test result")).setView(scroll)
+                .setPositiveButton(tr("共有", "Share"), (d, which) -> safely(() -> {
+                    Intent intent = new Intent(Intent.ACTION_SEND).setType("text/plain")
+                            .putExtra(Intent.EXTRA_SUBJECT, tr("SMB テストの結果", "SMB test result"))
+                            .putExtra(Intent.EXTRA_TEXT, report);
+                    startActivity(Intent.createChooser(intent, tr("結果を共有", "Share result")));
+                }))
+                .setNeutralButton(tr("コピー", "Copy"), (d, which) -> safely(() -> {
+                    ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                    clipboard.setPrimaryClip(ClipData.newPlainText("SMB test", report));
+                    Toast.makeText(this, tr("コピーしました", "Copied"), Toast.LENGTH_SHORT).show();
+                }))
+                .setNegativeButton(tr("閉じる", "Close"), null).create();
+        showSmbDialog(result);
     }
 
     private void skipRow(String title, String key) {

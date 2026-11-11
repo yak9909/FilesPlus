@@ -3,9 +3,14 @@ morphe-patcher = "2.3.0"
 #noinspection GradleDependency
 smali = "4220ae75f7"
 gson = "2.15.0"
+smbj = "0.15.0"
+# smbj declares bcprov only as a runtime dependency; keep the explicit entry to pin the version.
+bouncycastle = "1.85.2"
 
 [libraries]
 gson = { module = "com.google.code.gson:gson", version.ref = "gson" }
+smbj = { module = "com.hierynomus:smbj", version.ref = "smbj" }
+bcprov = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycastle" }
 # Gradle plugins adds the dependency during build, this declaration is here only for dependabot to provide updates.
 #noinspection UnusedVersionCatalogEntry
 morphe-patcher = { module = "app.morphe:morphe-patcher", version.ref = "morphe-patcher" }
