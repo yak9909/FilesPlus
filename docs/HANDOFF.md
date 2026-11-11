@@ -1,4 +1,4 @@
-# 引き継ぎメモ（最終更新: 2026-11-11 12:35）
+# 引き継ぎメモ（最終更新: 2026-11-11 13:10）
 
 /clear のあとに作業を再開するためのメモ。まず `CLAUDE.md`（運用ルール）と `docs/WORKERS.md`（ワーカーのセッション）を読むこと。
 
@@ -25,11 +25,8 @@
 - 確認・取り消し: CronList / CronDelete。
 
 ## 再開したらやること（順番）
-1. `tabs` ワーカーを上のコマンドで再開する（Codex が使えるか確認してから）。
-2. 待っている間に、Claude 自身で **新しい要望: 再生位置が n 秒未満でも巻き戻せるオプション**（DESIGN §5.1 の 0.7 追加）を実装する。ワーカーを使わず自分でやってよい（Codex の枠を tabs に回すため。重すぎるなら tabs の後でワーカーに頼む）。
-   - jadx で元アプリの巻き戻しの位置チェック（ボタン: `jpy` の rewind の case 付近、ダブルタップ: `kwd.b(MotionEvent)`、`VideoControlView` でボタンを無効にする箇所）を確認する。
-   - 設定キー `skip.rewindToStart` を `ModSettings` に追加し、Mod 設定のスキップ欄に切り替えを足す。ON のとき「現在位置 − n 秒」が負なら 0 秒へシークする。
-   - 既存パッチ `patches/src/main/kotlin/app/filesplus/patches/seek/CustomSkipDurationPatch.kt` と `extensions/.../seek/SkipHooks.java` に追加する。`feat:` でコミット。
+1. ~~`tabs` ワーカーを再開~~ → 12:47 に再開済み（実行中なら完了通知を待つ。止まっていたら同じコマンドで再開）。
+2. ~~巻き戻しオプション~~ → 実装済み・`dev` にコミット済み（70586c4、未 push）。元 APK に当てて `jpw.b` の差し替えを確認済み（ハーネス: `build/verify/`、README あり）。
 3. `tabs` が終わったらレビュー → worktree でコミット → `dev` にマージ → `bash scripts/build.sh --no-daemon` → push（`feat:` ならプレリリースが出る）→ ユーザーに日本語で報告。
 4. Phase 2 の残り（1つずつ）: 空のフォルダのタブ表示（§5.9）→ 現在のタブへ移動（§5.10）。
 5. その後: 全パッチをまとめて元の APK に当てる検証ツール（worker が `build/` に残した `VerifyModKit.java` などが参考）、Phase 5 の libVLC エンジン（APK にネイティブライブラリを足せるかの調査、32bit 版 APK で間に合うか。診断の「アプリの ABI」を見る）。
