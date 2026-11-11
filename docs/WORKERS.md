@@ -5,7 +5,7 @@ Delete a Codex session with `codex delete --force <id>` when its context is no l
 
 | Session ID | Model / effort | Purpose | Status |
 |------------|----------------|---------|--------|
-| subagent a0454dddf4d7bc645 | Claude sonnet / high | `smb` Task 3 (manifest provider patch + read-only `SmbDocumentsProvider`), plan `docs/plans/2026-11-12-smb.md`, worktree `../ModdedFiles-wt/smb`, branch `w/smb` | Running (started 2026-11-12). Not yet built/reviewed by main. Tasks 1-2 are in dev (task 2: 01b7bdc). |
+| subagent a0454dddf4d7bc645 | Claude sonnet / high | `smb` Task 3 (manifest provider patch + read-only `SmbDocumentsProvider`), plan `docs/plans/2026-11-12-smb.md`, worktree `../ModdedFiles-wt/smb`, branch `w/smb` | Done. Opus-reviewed (no Critical/Important), merged into dev. Tasks 1-3 are in dev. Next: Task 4 with a fresh implementer. |
 | (none) | | | `queue` (DESIGN 5.4, tasks 1-3) finished and merged into dev (d1fc25d). Worktrees `../ModdedFiles-wt/{tabs,preview,queue}` (branches `w/tabs`, `w/preview`, `w/queue`) can be removed. No Codex sessions. |
 
 Launcher (Codex fallback): `scripts/codex-worker.sh` (start/resume). Prompts and logs: `worker-logs/` (git-ignored).
