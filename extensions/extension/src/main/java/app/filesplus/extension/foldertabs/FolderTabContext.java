@@ -16,6 +16,7 @@ import android.os.storage.StorageManager;
 import android.os.storage.StorageVolume;
 import android.provider.MediaStore;
 import android.text.Html;
+import android.text.TextUtils;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
@@ -189,7 +190,7 @@ public final class FolderTabContext {
                 for (String path : known) {
                     File folder = new File(path);
                     if (present.contains(path) || names.contains(folder.getName().toLowerCase(Locale.ROOT))) continue;
-                    if ((!hidden && folder.getName().startsWith(".")) || protectedPath(folder, volumes)) continue;
+                    if ((!hidden && folder.getName().startsWith(".")) || protectedPath(folder, volumes, false)) continue;
                     // Canonical equality also excludes symlinks and paths that escape mounted storage.
                     if (path.equals(folderPath(folder, volumes))) added.add(path);
                 }
@@ -504,9 +505,11 @@ public final class FolderTabContext {
         if (!deletable(activity, folder)) return;
         busy = true;
         updateMenu();
+        // The dialog (and so the delete button) only exists after the exact count has finished.
+        toast(activity, japanese(activity) ? "ファイルを数えています…" : "Counting files...");
         WORKER.execute(() -> {
             try {
-                int count = countFiles(folder.toPath());
+                final long[] census = countFiles(folder.toPath());
                 MAIN.post(() -> {
                     try {
                         if (activity.isFinishing() || activity.isDestroyed()) {
@@ -516,7 +519,7 @@ public final class FolderTabContext {
                         new AlertDialog.Builder(activity)
                                 .setTitle(quantity(activity, "confirm_delete_folder_title", 1,
                                         japanese(activity) ? "フォルダを完全に削除しますか？" : "Delete folder permanently?"))
-                                .setMessage(folder.getAbsolutePath() + "\n\n" + confirmation(activity, count))
+                                .setMessage(folder.getAbsolutePath() + "\n\n" + confirmation(activity, census[0], census[1]))
                                 .setNegativeButton(string(activity, "cancel", japanese(activity) ? "キャンセル" : "Cancel"), null)
                                 .setPositiveButton(string(activity, "delete", japanese(activity) ? "削除" : "Delete"),
                                         (dialog, which) -> {
@@ -549,9 +552,15 @@ public final class FolderTabContext {
         WORKER.execute(() -> {
             final long[] result = new long[3]; // Deleted entries, failed entries, MediaStore failures.
             final List<String> deleted = new ArrayList<>();
+            final int[] refused = {0}; // 0 = allowed, 1 = protected, 2 = changed or removed.
             try {
-                // Recheck after the dialog; never follow directory symlinks, including the selected folder.
-                if (!deletable(context, folder)) throw new IOException("Protected or changed folder: " + folder);
+                // Recheck protection at delete time, not only when the menu item was shown; never follow
+                // directory symlinks, including the selected folder. Nothing is touched when it fails.
+                refused[0] = deleteCheck(context, folder);
+                if (refused[0] != 0) {
+                    throw new IOException((refused[0] == 1 ? "Protected folder" : "Folder changed or removed")
+                            + ", nothing deleted: " + folder);
+                }
                 deleteTree(context, folder, deleted, result);
             } catch (Throwable t) {
                 result[1]++;
@@ -570,8 +579,10 @@ public final class FolderTabContext {
                     deleting = false;
                     busy = false;
                     toast(context, success ? (japanese(context) ? "フォルダを削除しました" : "Folder deleted")
+                            : refused[0] == 1 ? (japanese(context) ? "保護されたフォルダのため削除しませんでした" : "Protected folder, not deleted")
+                            : refused[0] == 2 ? (japanese(context) ? "フォルダが変更または削除されたため、削除しませんでした" : "The folder changed or was removed, not deleted")
                             : (japanese(context) ? "フォルダの削除を完了できませんでした" : "Could not completely delete the folder"));
-                    removedKey = key;
+                    if (refused[0] == 0 || !folder.exists()) removedKey = key;
                     refresh();
                 } catch (Throwable t) { hookError(t); }
             });
@@ -640,14 +651,20 @@ public final class FolderTabContext {
         }
     }
 
-    private static int countFiles(Path folder) throws IOException {
-        final int[] count = {0};
+    /**
+     * Exact number of files (links count as files, are never followed) and their total size.
+     * Any unreadable entry aborts the walk: an incomplete count must never reach the confirmation.
+     */
+    private static long[] countFiles(Path folder) throws IOException {
+        final long[] total = {0, 0}; // Files, bytes.
         Files.walkFileTree(folder, new SimpleFileVisitor<Path>() {
             @Override public FileVisitResult visitFile(Path path, BasicFileAttributes attrs) {
-                return ++count[0] > 100 ? FileVisitResult.TERMINATE : FileVisitResult.CONTINUE;
+                total[0]++;
+                if (attrs.isRegularFile()) total[1] += attrs.size();
+                return FileVisitResult.CONTINUE;
             }
         });
-        return count[0];
+        return total;
     }
 
     private static String resolve(Context context, Bundle descriptor) throws IOException {
@@ -725,17 +742,28 @@ public final class FolderTabContext {
     }
 
     private static boolean deletable(Context context, File folder) {
+        return deleteCheck(context, folder) == 0;
+    }
+
+    /** 0 = may be deleted, 1 = protected folder, 2 = missing, linked, unreadable or not the same folder. */
+    private static int deleteCheck(Context context, File folder) {
         try {
             String path = folderPath(context, folder);
-            if (path == null || !path.equals(folder.getAbsolutePath())) return false;
-            return !protectedPath(new File(path), roots(context));
+            if (path == null || !path.equals(folder.getAbsolutePath())) return 2;
+            return protectedPath(new File(path), roots(context), true) ? 1 : 0;
         } catch (Throwable t) {
             DiagLog.e(AREA, "Cannot validate folder " + folder, t);
-            return false;
+            return 2;
         }
     }
 
-    private static boolean protectedPath(File folder, List<File> roots) {
+    /**
+     * Protection applies to the folder itself; files inside a protected folder stay movable.
+     * Android/ and .FilesPlus/ are protected including everything below them. The second-level
+     * camera/screen-capture rules are for deletion only: with {@code deletion} false (folder tabs)
+     * only the volume root, Android/, .FilesPlus and the top-level standard folders match.
+     */
+    private static boolean protectedPath(File folder, List<File> roots, boolean deletion) {
         for (File volume : roots) {
             String base = volume.getPath();
             String path = folder.getPath();
@@ -743,22 +771,46 @@ public final class FolderTabContext {
             if (!path.startsWith(base + File.separator)) continue;
             String relative = path.substring(base.length() + 1).replace(File.separatorChar, '/').toLowerCase(Locale.ROOT);
             if (relative.equals("android") || relative.startsWith("android/")) return true;
-            return !relative.contains("/") && STANDARD.contains(relative);
+            if (relative.equals(".filesplus") || relative.startsWith(".filesplus/")) return true;
+            String[] parts = relative.split("/");
+            if (parts.length == 1) return STANDARD.contains(relative);
+            return deletion && parts.length == 2 && protectedSecondLevel(parts[0], parts[1]);
         }
         return true;
     }
 
-    private static CharSequence confirmation(Context context, int count) {
+    /** Camera output and screen captures directly below a standard folder (names compared loosely). */
+    private static boolean protectedSecondLevel(String parent, String name) {
+        // "Screen Recorder", "screen_recorder" and "ScreenRecorder" are the same folder on different ColorOS builds.
+        String loose = name.replace(" ", "").replace("_", "").replace("-", "");
+        switch (parent) {
+            case "dcim":
+                return loose.equals("camera") || loose.equals("screenshots") || loose.equals("screenshot")
+                        || loose.startsWith("screenrecord");
+            case "pictures":
+                return loose.equals("screenshots") || loose.equals("screenshot");
+            case "movies":
+                return loose.startsWith("screenrecord");
+            default:
+                return false;
+        }
+    }
+
+    /** The count is exact (no "100+" cap); the total size is appended as its own line. */
+    private static CharSequence confirmation(Context context, long count, long bytes) {
         String fallback = japanese(context)
-                ? "この操作は取り消せません。フォルダ内のすべてのファイル（" + (count > 100 ? "100+" : count)
-                    + " 件）も完全に削除されます。"
-                : "This is permanent and cannot be undone. All " + (count > 100 ? "100+" : count)
+                ? "この操作は取り消せません。フォルダ内のすべてのファイル（" + count + " 件）も完全に削除されます。"
+                : "This is permanent and cannot be undone. All " + count
                     + " files inside the folder will also be permanently deleted.";
         String text;
-        if (count > 100) text = string(context,
-                "confirm_delete_file_inside_folder_exceeding_threshold_subtitle_new", fallback, "100");
-        else if (count > 0) text = quantity(context, "confirm_delete_file_inside_folder_subtitle_new", count, fallback);
+        if (count > 0) text = quantity(context, "confirm_delete_file_inside_folder_subtitle_new",
+                (int) Math.min(count, Integer.MAX_VALUE), fallback);
         else text = string(context, "confirm_delete_subtitle_new", fallback);
+        if (count > 0) {
+            String size = (japanese(context) ? "合計サイズ: " : "Total size: ")
+                    + android.text.format.Formatter.formatFileSize(context, bytes);
+            text += "<br><br>" + TextUtils.htmlEncode(size);
+        }
         return Html.fromHtml(text, Html.FROM_HTML_MODE_LEGACY);
     }
 
