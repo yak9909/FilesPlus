@@ -209,12 +209,18 @@ object SelectionStore {                         // プレビュー（§5.2）と
 
 **調査結果（2026-11-11、versionCode 2081362。難読化名は目印だけ。フィンガープリントには使わない）**
 - メニュー: `FilePreviewActivity` は器だけ。ギャラリーの fragment（`jju`、layout `fragment_file_preview_gallery`）が `(Menu, MenuInflater)V` で `R.menu.file_preview_menu`（0x7f0f000e）を inflate する（フォルダなどでは inflate せずに早く return する）。クリックは `aI(MenuItem)` の if 連鎖。目印の文字列: `"Fragment:onOptionsItemSelected"`、`"FilePreviewFragmentViewPager"`。項目は固定の int id で足し、選択が変わったら `invalidateOptionsMenu()` で作り直す。
-- 今のファイル: ページ切り替えは `jko`（ViewPager2 の OnPageChangeCallback、`G(int)` = onPageSelected）。fragment の peer（`jkt`）の `c()` が今のファイルの proto（`kqi`）を返す。`c()` は `d(I)` を呼び、`d` に文字列 `"File preview index is not valid."` がある。`kqi.r` = MediaStore id（`b & 131072`）、`kqi.k` = content URI（`b & 256`）。どちらもないファイルでは「選択」を出さない。
+- 今のファイル: ページ切り替えは `jko`（ViewPager2 の OnPageChangeCallback、`G(int)` = onPageSelected）。fragment の peer（`jkt`）の `c()` が今のファイルの proto（`kqi`）を返す。`c()` は `d(I)` を呼び、`d` に文字列 `"File preview index is not valid."` がある。`kqi.r` = MediaStore id（`b & 131072`）、`kqi.k` = content URI（`b & 256`）。どちらもないファイルでは「選択」を出さない。**実装の判断（0.9）**: 当面は MediaStore id のあるファイルだけに「選択」を出す（content URI だけのファイルには出さない。SelectionStore を id で引くため）。
 - チェック印: ページのビューは使い回されるので、gallery の root（CoordinatorLayout。`toolbar` の親）に重ねるビューを1つだけ足す。クリックもフォーカスも受けないようにし、z 順に注意する（`scrim`、toolbar のグラデーション）。
 - 回転で Activity は作り直されない（configChanges あり）。選択は拡張の static（`LinkedHashMap<id, kqi>`、型は Object で持つ）に置く。プロセスが終われば消えてよい。
 - 一覧への引き継ぎ: 一覧の選択モデル（`lmq`、文字列 `SELECTED_DATA_STATE_TAG` / `SELECTION_DATA_SOURCE` で見つかる。MoveToCurrentTabPatch と同じ持ち主）の `(List)V`（`r`、`List<kqi>` を受ける）に、覚えておいた `kqi` を smali のブリッジで渡す。持ち主の resume や戻りでフックする。id だけから作り直すのは脆いので、`kqi` を持っておく。難しさは中〜やや脆い。
 
 **分割（0.8）**: ①調査（済）→ ②`SelectionStore` とプレビューのメニュー（選択／選択を解除／選択中 n 件）→ ③チェック印と一覧の選択モードへの引き継ぎ。
+
+**実装の状態（0.9、dev.7 で公開、実機は未確認）**: ②③とも実装済み（パッチ名 "Multi-select in preview"）。実装で決めたこと:
+- `SelectionStore` は MediaStore id → 元アプリのエントリ（proto）の LinkedHashMap（`Set<VPath>` ではない）。content URI だけのファイルは選べない。「選択中 n 件」を押すと確認なしで解除する。
+- チェック印は1つの自前の View（右上、ツールバーの右端に合わせる。ツールバーを隠すと印も隠れる）。
+- 一覧への引き継ぎ: 選択モデル（`SELECTED_DATA_STATE_TAG` を持つクラス）をコンストラクタで拡張側に弱参照で登録し、プレビューが閉じたあとに resume した画面が持つモデルへ `(List, Z)V`（`false`）で足す。既存の選択は消さない。引き継ぐ直前に MediaStore で存在を確かめ、なくなったファイルは外す。外部アプリから開いたプレビューは閉じるときに選択を捨てる。
+- 実機で確かめること: HANDOFF.md の項目（回転、ファイル情報を開いて戻る、検索・カテゴリ・ホームから開く、ゴミ箱の挙動、SD カード）。音量キーでの切り替え（任意設定）と、移動キュー・共有などから SelectionStore を直接使う操作は未実装。
 
 ### 5.3 SMB 接続（フォルダと同じように扱う）
 

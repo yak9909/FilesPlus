@@ -22,7 +22,8 @@
 - 利用枠の見張り: 5時間枠 80%・週間枠 95% で中断処理（強制終了ではない。CLAUDE.md 参照）。
 
 ## 再開したらやること（順番）
-1. **§5.2 の修正ラウンド（利用枠 76% で中断した続き）**。計画書 `docs/plans/2026-11-11-preview-multiselect.md`（タスク1〜3）。タスク1〜3は worktree `E:/Projects/ModdedFiles-wt/preview`（`w/preview`、コミット `c3ebb16` `30527c7` `040ad54`）に実装済み。ビルドと全パッチの適用は私の手元で成功済み。タスク3のレビュー（Opus）で Critical なし、Important 4件が残っている。**`dev` にはまだマージしていない**（この4件で選択が失われる経路があるため。直してからマージ）。
+0. **§5.2 は完了し `dev` にマージ済み（2026-11-11 夜、dev.7 としてリリース予定）**。修正ラウンドも済み（Opus レビューの Important 4件 → Sonnet が修正 → Sonnet が再確認して全件 OK）。下の項目 1 は経緯の記録。実機で確かめる項目は項目 1 の最後に残してある。worktree `ModdedFiles-wt/preview` は不要になったら消してよい。
+1. （経緯）**§5.2 の修正ラウンド（利用枠 76% で中断した続き）**。計画書 `docs/plans/2026-11-11-preview-multiselect.md`（タスク1〜3）。タスク1〜3は worktree `E:/Projects/ModdedFiles-wt/preview`（`w/preview`、コミット `c3ebb16` `30527c7` `040ad54`）に実装済み。ビルドと全パッチの適用は私の手元で成功済み。タスク3のレビュー（Opus）で Critical なし、Important 4件が残っている。**`dev` にはまだマージしていない**（この4件で選択が失われる経路があるため。直してからマージ）。
    - Important 1: 回転して戻ったとき、一覧のモデルが resume より後に作られると選択が失われる（`ListHandoff.java:97-115`）。直し方: `registerModel` で、ストアが空でなくプレビューが終了済みなら `handOver(current)` を post する。
    - Important 2: `isPreview` がプレビューのインスタンスへの弱参照に頼っている（`:84-87`, `:128-129`）。低メモリや「アクティビティを保持しない」で、戻ったときにプレビュー自身の（使われない）モデルに渡してしまう。直し方: プレビューの `Class<?>` を強参照で持ち、終了判定だけ弱参照のインスタンスで行う。
    - Important 3: プレビュー内で削除／ゴミ箱にしたファイルが、選択に残ったまま渡される。直し方: 削除・ゴミ箱の箇所で今のエントリを外す（`DELETE_DIALOG` / `MOVE_TO_TRASH_DIALOG_TAG` のページコールバック付近）。難しければ実機確認項目に回す。
@@ -30,7 +31,7 @@
    - Minor: `invoke-static {p0}` を `/range` に（`PreviewMultiSelectPatch.kt:260`）、マージ確認のスキャンを軽くする、`installed` の同期、使われなくなった `takePendingForList()` の削除、パッチの description に一覧への引き継ぎを書く。
    - 手順: 実装者（Sonnet）に上の Important を直させる → 直した差分だけを Sonnet か Opus で再確認 → ビルドと `build/verify/` 相当で全パッチ適用 → `dev` にマージ → `git pull --no-rebase origin dev` → push → プレリリース → DESIGN §5.2 の状態を更新（`SelectionStore` は id→エントリで、content URI だけのファイルは選べない／ブリッジは `s(List,false)`／所有する Activity にだけ渡す、という実装の判断を書く）。
    - 実機で確かめること: プレビューで2〜3件選んで戻ると一覧で選択されている／回転して戻っても同じ／2回目のプレビューに古い印が出ない／ファイル情報を開いて戻っても選択が保たれる／検索・カテゴリ・ホームから開いたプレビュー／外部アプリから開いたプレビュー／一覧での選択が従来どおり動く。
-2. その後は Phase 3 の移動キュー（§5.4）。
+2. **次: Phase 3 の移動キュー（§5.4）**（JobQueue もここで導入、§5.8 の 0.7）。DESIGN §5.4 を読んで `superpowers:writing-plans` で計画書を `docs/plans/` に書く。ゴミ箱の挙動と SD カードの存在確認は、実機確認項目に加える。
 3. 実機確認はユーザーが最後にまとめて行うので、それまでは実装を進めてよい。
 
 ## このあとの実装順（DESIGN.md §7）
