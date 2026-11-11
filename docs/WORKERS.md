@@ -5,7 +5,8 @@ Delete a session with `codex delete --force <id>` when its context is no longer 
 
 | Session ID | Model / effort | Purpose | Status |
 |------------|----------------|---------|--------|
-| (none) | | | Phase 2 finished 2026-11-11; Codex `tabs` session deleted. Worktree `../ModdedFiles-wt/tabs` (branch `w/tabs`) can be reused or removed. |
+| subagent a7bdbd630b3e83292 | Claude sonnet / high | `preview` Task 1 (SelectionStore + preview menu), plan `docs/plans/2026-11-11-preview-multiselect.md`, worktree `../ModdedFiles-wt/preview`, branch `w/preview` | Running (started 2026-11-11). Next: Opus reviewer, then Task 2. |
+| (none) | | | Codex `tabs` session deleted. Worktree `../ModdedFiles-wt/tabs` (branch `w/tabs`) can be removed. |
 
 Launcher: `scripts/codex-worker.sh` (start/resume). Prompts and logs: `worker-logs/` (git-ignored).
 Run at most 1 worker at a time (2 only if needed). Workers each use their own git worktree under `E:/Projects/ModdedFiles-wt/` to avoid build conflicts; Claude merges branches into `dev` after review.
