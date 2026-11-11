@@ -1,7 +1,7 @@
 {
-  "created_at": "2026-11-11T16:36:59",
-  "description": "## [1.0.0-dev.8](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.7...v1.0.0-dev.8) (2026-11-11)\n\n### ✨ New Features\n\n* Add move destination history and background move queue ([5d9bf82](https://github.com/yak9909/FilesPlus/commit/5d9bf82e93fd1cd52d1ba7c3b4f0148f266f38d2))\n* Remove the moved file from the preview pager ([0758e18](https://github.com/yak9909/FilesPlus/commit/0758e1817f3d9f87f0a00a99511dd29595e3c0cb))\n* Send the preview file or selection to a chosen folder ([aa96fe1](https://github.com/yak9909/FilesPlus/commit/aa96fe1697106e9ee7d4ef30f671f4adb20bb39f))",
-  "download_url": "https://github.com/yak9909/FilesPlus/releases/download/v1.0.0-dev.8/patches-1.0.0-dev.8.mpp",
+  "created_at": "2026-11-11T17:48:45",
+  "description": "## [1.0.0-dev.9](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.8...v1.0.0-dev.9) (2026-11-11)\n\n### ✨ New Features\n\n* Add smbj and an SMB connection test to the diagnostics ([835eb5d](https://github.com/yak9909/FilesPlus/commit/835eb5da0b6edc4b0c9397d70c5fe040a0d69992))",
+  "download_url": "https://github.com/yak9909/FilesPlus/releases/download/v1.0.0-dev.9/patches-1.0.0-dev.9.mpp",
   "signature_download_url": "",
-  "version": "1.0.0-dev.8"
+  "version": "1.0.0-dev.9"
 }

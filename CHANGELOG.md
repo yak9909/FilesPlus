@@ -1,3 +1,9 @@
+## [1.0.0-dev.9](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.8...v1.0.0-dev.9) (2026-11-11)
+
+### ✨ New Features
+
+* Add smbj and an SMB connection test to the diagnostics ([835eb5d](https://github.com/yak9909/FilesPlus/commit/835eb5da0b6edc4b0c9397d70c5fe040a0d69992))
+
 ## [1.0.0-dev.8](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.7...v1.0.0-dev.8) (2026-11-11)
 
 ### ✨ New Features
