@@ -1,7 +1,7 @@
 {
-  "created_at": "2026-11-11T22:00:49",
-  "description": "## [1.0.0-dev.14](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.13...v1.0.0-dev.14) (2026-11-11)\n\n### ✨ New Features\n\n* Move deleted folders to a recoverable trash instead of deleting them ([bdbddd4](https://github.com/yak9909/FilesPlus/commit/bdbddd4774df53a15031b3f0f93d790926429216))",
-  "download_url": "https://github.com/yak9909/FilesPlus/releases/download/v1.0.0-dev.14/patches-1.0.0-dev.14.mpp",
+  "created_at": "2026-11-11T23:14:51",
+  "description": "## [1.0.0-dev.15](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.14...v1.0.0-dev.15) (2026-11-11)\n\n### 🐛 Bug Fixes\n\n* Move files by reserving the target name and renaming, never copy and delete ([d44d730](https://github.com/yak9909/FilesPlus/commit/d44d7304b009301199d06362572b2945e3cccf25))",
+  "download_url": "https://github.com/yak9909/FilesPlus/releases/download/v1.0.0-dev.15/patches-1.0.0-dev.15.mpp",
   "signature_download_url": "",
-  "version": "1.0.0-dev.14"
+  "version": "1.0.0-dev.15"
 }
