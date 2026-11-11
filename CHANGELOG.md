@@ -1,3 +1,9 @@
+## [1.0.0-dev.14](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.13...v1.0.0-dev.14) (2026-11-11)
+
+### ✨ New Features
+
+* Move deleted folders to a recoverable trash instead of deleting them ([bdbddd4](https://github.com/yak9909/FilesPlus/commit/bdbddd4774df53a15031b3f0f93d790926429216))
+
 ## [1.0.0-dev.13](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.12...v1.0.0-dev.13) (2026-11-11)
 
 ### ✨ New Features
