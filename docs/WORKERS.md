@@ -1,11 +1,11 @@
-# Codex worker sessions
+# Worker sessions
 
-Active Codex CLI sessions (see CLAUDE.md "Working with Codex CLI workers").
+Active workers (see CLAUDE.md "Workers"). Claude subagents (Sonnet/Haiku) are preferred; Codex is a fallback.
 Delete a session with `codex delete --force <id>` when its context is no longer needed, and remove its row.
 
 | Session ID | Model / effort | Purpose | Status |
 |------------|----------------|---------|--------|
-| 01a1c8a6-b6d8-72a3-b155-9b8db5ce9f57 | gpt-6.1-sol / high | `tabs`: folder-tab context + delete folder (DESIGN 5.7/5.8), worktree `../ModdedFiles-wt/tabs`, branch `w/tabs` | 5.7/5.8/5.9 done and merged into dev. Idle; next: 5.10 with `worker-logs/prompts/movetotab.md`. Before reuse: `git -C ../ModdedFiles-wt/tabs merge dev` |
+| (none) | | | Phase 2 finished 2026-11-11; Codex `tabs` session deleted. Worktree `../ModdedFiles-wt/tabs` (branch `w/tabs`) can be reused or removed. |
 
 Launcher: `scripts/codex-worker.sh` (start/resume). Prompts and logs: `worker-logs/` (git-ignored).
 Run at most 1 worker at a time (2 only if needed). Workers each use their own git worktree under `E:/Projects/ModdedFiles-wt/` to avoid build conflicts; Claude merges branches into `dev` after review.
