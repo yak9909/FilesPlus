@@ -1,3 +1,9 @@
+## [1.0.0-dev.10](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.9...v1.0.0-dev.10) (2026-11-11)
+
+### ✨ New Features
+
+* Save SMB connections and add the SMB file layer ([8d48560](https://github.com/yak9909/FilesPlus/commit/8d48560359e5001608dd94706f03e9c9cc8f508a))
+
 ## [1.0.0-dev.9](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.8...v1.0.0-dev.9) (2026-11-11)
 
 ### ✨ New Features
