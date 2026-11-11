@@ -1,3 +1,15 @@
+## [1.0.0-dev.7](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.6...v1.0.0-dev.7) (2026-11-11)
+
+### ✨ New Features
+
+* Add select items to the preview menu ([c3ebb16](https://github.com/yak9909/FilesPlus/commit/c3ebb16d9b0a5745459bf10348636aa7d48a51d0))
+* Hand the preview selection over to the list selection mode ([040ad54](https://github.com/yak9909/FilesPlus/commit/040ad545991f410e33d2accca363565cd7aead55))
+* Show a check mark on selected files in the preview ([30527c7](https://github.com/yak9909/FilesPlus/commit/30527c76cb65b44ac876c122d81cd4c756eb2c40))
+
+### 🐛 Bug Fixes
+
+* Keep the preview selection across rotation and recreation ([7cb9a03](https://github.com/yak9909/FilesPlus/commit/7cb9a035ee0d22f4c41afc59c72575b9cc6378ec))
+
 ## [1.0.0-dev.6](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.5...v1.0.0-dev.6) (2026-11-11)
 
 ### ✨ New Features

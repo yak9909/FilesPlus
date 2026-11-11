@@ -1,7 +1,7 @@
 {
-  "created_at": "2026-11-11T10:48:05",
-  "description": "## [1.0.0-dev.6](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.5...v1.0.0-dev.6) (2026-11-11)\n\n### ✨ New Features\n\n* Move selected files to the current folder tab ([640b222](https://github.com/yak9909/FilesPlus/commit/640b222dffdc03dc21392fb32a4b41fe31b8c265))",
-  "download_url": "https://github.com/yak9909/FilesPlus/releases/download/v1.0.0-dev.6/patches-1.0.0-dev.6.mpp",
+  "created_at": "2026-11-11T14:51:51",
+  "description": "## [1.0.0-dev.7](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.6...v1.0.0-dev.7) (2026-11-11)\n\n### ✨ New Features\n\n* Add select items to the preview menu ([c3ebb16](https://github.com/yak9909/FilesPlus/commit/c3ebb16d9b0a5745459bf10348636aa7d48a51d0))\n* Hand the preview selection over to the list selection mode ([040ad54](https://github.com/yak9909/FilesPlus/commit/040ad545991f410e33d2accca363565cd7aead55))\n* Show a check mark on selected files in the preview ([30527c7](https://github.com/yak9909/FilesPlus/commit/30527c76cb65b44ac876c122d81cd4c756eb2c40))\n\n### 🐛 Bug Fixes\n\n* Keep the preview selection across rotation and recreation ([7cb9a03](https://github.com/yak9909/FilesPlus/commit/7cb9a035ee0d22f4c41afc59c72575b9cc6378ec))",
+  "download_url": "https://github.com/yak9909/FilesPlus/releases/download/v1.0.0-dev.7/patches-1.0.0-dev.7.mpp",
   "signature_download_url": "",
-  "version": "1.0.0-dev.6"
+  "version": "1.0.0-dev.7"
 }

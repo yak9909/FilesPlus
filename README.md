@@ -21,9 +21,9 @@ Click the button below, or manually add this repo url to Morphe Manager: https:/
 ## 🩹 Patches list
 
 <!-- PATCHES_START EXPANDED -->
-> **[v1.0.0-dev.6](https://github.com/yak9909/FilesPlus/releases/tag/v1.0.0-dev.6)**&nbsp;&nbsp;•&nbsp;&nbsp;`dev`&nbsp;&nbsp;•&nbsp;&nbsp;6 patches total
+> **[v1.0.0-dev.7](https://github.com/yak9909/FilesPlus/releases/tag/v1.0.0-dev.7)**&nbsp;&nbsp;•&nbsp;&nbsp;`dev`&nbsp;&nbsp;•&nbsp;&nbsp;7 patches total
 <details open>
-<summary>📦 Files by Google&nbsp;&nbsp;•&nbsp;&nbsp;6 patches</summary>
+<summary>📦 Files by Google&nbsp;&nbsp;•&nbsp;&nbsp;7 patches</summary>
 <br>
 
 **Package name:** `com.google.android.apps.nbu.files`
@@ -40,6 +40,7 @@ Click the button below, or manually add this repo url to Morphe Manager: https:/
 | [Delete folder from tabs](#delete-folder-from-tabs) | Permanently delete the current folder from category tabs, with confirmation and protected folders. |  |
 | [High-resolution playback](#high-resolution-playback) | Try videos beyond reported decoder limits, enable decoder fallback, and log playback diagnostics. |  |
 | [Move to current tab](#move-to-current-tab) | Add a selection-mode menu item that moves the selected files into the folder of the current category tab. |  |
+| [Multi-select in preview](#multi-select-in-preview) | Add Select / Deselect items to the preview screen's menu to collect files while previewing, and select them in the list when you go back. |  |
 | [Show empty folder tabs](#show-empty-folder-tabs) | Remember category folders and optionally append tabs for known folders with no matching files. |  |
 
 </details>
