@@ -34,6 +34,22 @@ public final class SkipHooks {
         }
     }
 
+    /**
+     * Rewind amount for a double-tap rewind. The app ignores a rewind that would end at or before
+     * the start; when enabled, shrink the amount so it lands at the start instead. Units are the
+     * caller's (nanoseconds for video, milliseconds for audio); 1 unit is kept because the video
+     * check requires a positive result.
+     */
+    public static long rewindSkip(long position, long skip) {
+        try {
+            if (position - skip > 0 || position <= 1 || !ModSettings.skipRewindToStart()) return skip;
+            return position - 1;
+        } catch (Throwable t) {
+            DiagLog.e("seek", "Computing rewind to start", t);
+            return skip;
+        }
+    }
+
     public static void onFinishInflate(View root) {
         try {
             Context context = root.getContext();

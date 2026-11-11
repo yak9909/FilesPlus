@@ -8,7 +8,7 @@ export GITHUB_ACTOR="${GITHUB_ACTOR:-yak9909}"
 export GITHUB_TOKEN="${GITHUB_TOKEN:-$(gh auth token)}"
 mkdir -p build
 if ./gradlew buildAndroid --console=plain "$@" > build/build.log 2>&1; then
-  echo "BUILD OK: $(ls patches/build/libs/*.mpp)"
+  echo "BUILD OK: $(ls -t patches/build/libs/*.mpp | head -1)"
 else
   grep -E '^e: |error:|What went wrong' -A3 build/build.log | head -60
   echo "BUILD FAILED (see build/build.log)"; exit 1

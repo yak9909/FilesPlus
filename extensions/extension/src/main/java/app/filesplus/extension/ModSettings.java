@@ -15,6 +15,8 @@ public final class ModSettings {
     public static final int DEFAULT_SKIP_SEC = 10;
     public static final int MIN_SKIP_SEC = 1;
     public static final int MAX_SKIP_SEC = 600;
+    public static final String SKIP_REWIND_TO_START = "skip.rewindToStart";
+    public static final boolean DEFAULT_SKIP_REWIND_TO_START = true;
 
     private ModSettings() {}
 
@@ -61,5 +63,9 @@ public final class ModSettings {
 
     public static int skipButtonSec() {
         return clampSkip(getInt(SKIP_BUTTON_SEC, DEFAULT_SKIP_SEC));
+    }
+
+    public static boolean skipRewindToStart() {
+        return getBool(SKIP_REWIND_TO_START, DEFAULT_SKIP_REWIND_TO_START);
     }
 }

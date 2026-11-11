@@ -73,7 +73,7 @@ private val skipStringsPatch = resourcePatch {
 
 val customSkipDurationPatch = bytecodePatch(
     name = "Custom skip duration",
-    description = "Customize double-tap and button skip durations; long-press a skip button to change its duration.",
+    description = "Customize double-tap and button skip durations; long-press a skip button to change its duration. Optionally, a double-tap rewind near the start goes to the start.",
     default = true,
 ) {
     compatibleWith(Constants.COMPATIBILITY_FILES)
@@ -176,5 +176,73 @@ val customSkipDurationPatch = bytecodePatch(
         for ((index) in returns.reversed()) {
             inflate.addInstructions(index, "invoke-static/range {p0 .. p0}, $HOOKS->onFinishInflate(Landroid/view/View;)V")
         }
+
+        hookRewindToStart(factory.returnType)
     }
+}
+
+/**
+ * Double-tap rewind is ignored when it would end at or before the start (the buttons already
+ * clamp to 0). Shrink the rewind amount via [HOOKS]`.rewindSkip` in both quick seek callbacks:
+ * the video one (duration objects, result must be positive) and the audio one (millisecond longs).
+ */
+private fun app.morphe.patcher.patch.BytecodePatchContext.hookRewindToStart(duration: String) {
+    val owner = mutableClassDefBy(classDefBy { cls ->
+        cls.methods.any { it.hasString("rewind is called when videoPlayer is null.") }
+    })
+    val rewind = owner.methods.single { it.hasString("rewind is called when videoPlayer is null.") }
+    check(rewind.parameterTypes == listOf(duration) && rewind.returnType == "Z") { "Unexpected rewind callback" }
+
+    val durationClass = mutableClassDefBy(duration)
+    val nanos = durationClass.fields.single { !AccessFlags.STATIC.isSet(it.accessFlags) && it.type == "J" }
+    check(durationClass.methods.any { it.name == "<init>" && it.parameterTypes == listOf("J") })
+
+    // Audio: `position - skip >= 0` on milliseconds. Rewrite the skip operand before the subtraction.
+    val subs = rewind.code().withIndex().filter {
+        it.value.opcode == Opcode.SUB_LONG || it.value.opcode == Opcode.SUB_LONG_2ADDR
+    }
+    check(subs.size == 1) { "Expected one audio rewind subtraction, got ${subs.size}" }
+    val (subIndex, sub) = subs.single()
+    val (position, skip) = if (sub is ThreeRegisterInstruction) sub.registerB to sub.registerC
+        else (sub as TwoRegisterInstruction).registerA to sub.registerB
+    check(maxOf(position, skip) + 1 <= 15) { "Audio rewind registers out of range" }
+    rewind.addInstructions(subIndex, """
+        invoke-static {v$position, v${position + 1}, v$skip, v${skip + 1}}, $HOOKS->rewindSkip(JJ)J
+        move-result-wide v$skip
+    """.trimIndent())
+
+    // Video: `position.minus(skip)` must stay positive. Replace skip before the call.
+    val minus = rewind.code().withIndex().filter { (_, insn) ->
+        val ref = insn.reference() as? MethodReference
+        insn.opcode == Opcode.INVOKE_VIRTUAL && ref?.definingClass == duration &&
+            ref.parameterTypes == listOf(duration) && ref.returnType == duration
+    }
+    check(minus.size == 1) { "Expected one video rewind subtraction, got ${minus.size}" }
+    val (minusIndex, call) = minus.single()
+    call as FiveRegisterInstruction
+    check(call.registerCount == 2)
+
+    val helperName = "modKitRewindSkip"
+    check(owner.methods.none { it.name == helperName })
+    val helper = MutableMethod(ImmutableMethod(
+        owner.type, helperName, listOf(
+            com.android.tools.smali.dexlib2.immutable.ImmutableMethodParameter(duration, null, null),
+            com.android.tools.smali.dexlib2.immutable.ImmutableMethodParameter(duration, null, null),
+        ), duration, AccessFlags.PUBLIC.value or AccessFlags.STATIC.value, emptySet(), emptySet(),
+        ImmutableMethodImplementation(6, emptyList(), emptyList(), emptyList()),
+    ))
+    helper.addInstructions(0, """
+        iget-wide v0, p0, $nanos
+        iget-wide v2, p1, $nanos
+        invoke-static {v0, v1, v2, v3}, $HOOKS->rewindSkip(JJ)J
+        move-result-wide v0
+        new-instance v2, $duration
+        invoke-direct {v2, v0, v1}, $duration-><init>(J)V
+        return-object v2
+    """.trimIndent())
+    owner.methods.add(helper)
+    rewind.addInstructions(minusIndex, """
+        invoke-static {v${call.registerC}, v${call.registerD}}, ${owner.type}->$helperName($duration$duration)$duration
+        move-result-object v${call.registerD}
+    """.trimIndent())
 }

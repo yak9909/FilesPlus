@@ -19,6 +19,7 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 import app.filesplus.extension.DiagLog;
@@ -97,6 +98,18 @@ public final class ModSettingsActivity extends Activity {
         header(tr("スキップ", "Skip"));
         skipRow(tr("ダブルタップのスキップ秒数", "Double-tap skip seconds"), ModSettings.SKIP_DOUBLE_TAP_SEC);
         skipRow(tr("ボタンのスキップ秒数", "Button skip seconds"), ModSettings.SKIP_BUTTON_SEC);
+        Switch toStart = new Switch(this);
+        toStart.setText(tr("先頭付近でも巻き戻す", "Rewind near the start"));
+        toStart.setTextSize(16);
+        toStart.setTextColor(primary);
+        toStart.setPadding(dp(24), dp(16), dp(24), dp(16));
+        toStart.setMinimumHeight(dp(72));
+        toStart.setChecked(ModSettings.skipRewindToStart());
+        toStart.setOnCheckedChangeListener((view, checked) ->
+                safely(() -> ModSettings.putBool(ModSettings.SKIP_REWIND_TO_START, checked)));
+        sections.addView(toStart);
+        details(tr("ダブルタップの巻き戻しで、戻す秒数より手前にいるときは先頭へ戻ります。",
+                "A double-tap rewind closer to the start than the skip duration goes to the start."));
     }
 
     private void addDiagnosticsSection() {
