@@ -1,3 +1,9 @@
+## [1.0.0-dev.16](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.15...v1.0.0-dev.16) (2026-11-11)
+
+### 🐛 Bug Fixes
+
+* Log how each folder tab resolves to a folder in the diagnostics ([ff9975c](https://github.com/yak9909/FilesPlus/commit/ff9975c850d752917d392686a9649cb028ab8bcd))
+
 ## [1.0.0-dev.15](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.14...v1.0.0-dev.15) (2026-11-11)
 
 ### 🐛 Bug Fixes
