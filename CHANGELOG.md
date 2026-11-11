@@ -1,3 +1,10 @@
+## [1.0.0-dev.4](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.3...v1.0.0-dev.4) (2026-11-11)
+
+### ✨ New Features
+
+* Allow double-tap rewind near the start to go to the start ([70586c4](https://github.com/yak9909/FilesPlus/commit/70586c4c96783b4ff9cc732064a19dcf0a8cfbd7))
+* Delete the current folder from category tabs ([3db74df](https://github.com/yak9909/FilesPlus/commit/3db74df0b3128011fbca7af220762101812a8756))
+
 ## [1.0.0-dev.3](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.2...v1.0.0-dev.3) (2026-11-11)
 
 ### 🐛 Bug Fixes
