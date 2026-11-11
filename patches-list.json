@@ -1,6 +1,6 @@
 {
   "NOTE": "Do NOT manually edit this file. This file is automatically updated when semantic release (release.yml) runs. Manually editing this file can break your releases and break third party tools that use this file.",
-  "version": "1.0.0-dev.7",
+  "version": "1.0.0-dev.8",
   "patches": [
     {
       "name": "Change package name",
@@ -105,6 +105,33 @@
     {
       "name": "High-resolution playback",
       "description": "Try videos beyond reported decoder limits, enable decoder fallback, and log playback diagnostics.",
+      "default": true,
+      "category": null,
+      "compatiblePackages": [
+        {
+          "packageName": "com.google.android.apps.nbu.files",
+          "name": "Files by Google",
+          "description": null,
+          "apkFileType": "APKM",
+          "appIconColor": "#4484F4",
+          "signatures": null,
+          "formFactor": "MOBILE",
+          "targets": [
+            {
+              "version": "1.13157.1011540316.0-release",
+              "versionCodes": null,
+              "isExperimental": false,
+              "minSdk": null,
+              "description": null
+            }
+          ]
+        }
+      ],
+      "options": []
+    },
+    {
+      "name": "Move queue in preview",
+      "description": "Add Send to… to the preview screen's menu to move the current file (or the selected files) to a folder in the background. Single files that are not playing move on to the next file at once; playing videos and multi-file sends are moved without changing the page.",
       "default": true,
       "category": null,
       "compatiblePackages": [

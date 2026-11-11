@@ -1,3 +1,11 @@
+## [1.0.0-dev.8](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.7...v1.0.0-dev.8) (2026-11-11)
+
+### ✨ New Features
+
+* Add move destination history and background move queue ([5d9bf82](https://github.com/yak9909/FilesPlus/commit/5d9bf82e93fd1cd52d1ba7c3b4f0148f266f38d2))
+* Remove the moved file from the preview pager ([0758e18](https://github.com/yak9909/FilesPlus/commit/0758e1817f3d9f87f0a00a99511dd29595e3c0cb))
+* Send the preview file or selection to a chosen folder ([aa96fe1](https://github.com/yak9909/FilesPlus/commit/aa96fe1697106e9ee7d4ef30f671f4adb20bb39f))
+
 ## [1.0.0-dev.7](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.6...v1.0.0-dev.7) (2026-11-11)
 
 ### ✨ New Features

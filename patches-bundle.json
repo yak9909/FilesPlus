@@ -1,7 +1,7 @@
 {
-  "created_at": "2026-11-11T14:51:51",
-  "description": "## [1.0.0-dev.7](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.6...v1.0.0-dev.7) (2026-11-11)\n\n### ✨ New Features\n\n* Add select items to the preview menu ([c3ebb16](https://github.com/yak9909/FilesPlus/commit/c3ebb16d9b0a5745459bf10348636aa7d48a51d0))\n* Hand the preview selection over to the list selection mode ([040ad54](https://github.com/yak9909/FilesPlus/commit/040ad545991f410e33d2accca363565cd7aead55))\n* Show a check mark on selected files in the preview ([30527c7](https://github.com/yak9909/FilesPlus/commit/30527c76cb65b44ac876c122d81cd4c756eb2c40))\n\n### 🐛 Bug Fixes\n\n* Keep the preview selection across rotation and recreation ([7cb9a03](https://github.com/yak9909/FilesPlus/commit/7cb9a035ee0d22f4c41afc59c72575b9cc6378ec))",
-  "download_url": "https://github.com/yak9909/FilesPlus/releases/download/v1.0.0-dev.7/patches-1.0.0-dev.7.mpp",
+  "created_at": "2026-11-11T16:36:59",
+  "description": "## [1.0.0-dev.8](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.7...v1.0.0-dev.8) (2026-11-11)\n\n### ✨ New Features\n\n* Add move destination history and background move queue ([5d9bf82](https://github.com/yak9909/FilesPlus/commit/5d9bf82e93fd1cd52d1ba7c3b4f0148f266f38d2))\n* Remove the moved file from the preview pager ([0758e18](https://github.com/yak9909/FilesPlus/commit/0758e1817f3d9f87f0a00a99511dd29595e3c0cb))\n* Send the preview file or selection to a chosen folder ([aa96fe1](https://github.com/yak9909/FilesPlus/commit/aa96fe1697106e9ee7d4ef30f671f4adb20bb39f))",
+  "download_url": "https://github.com/yak9909/FilesPlus/releases/download/v1.0.0-dev.8/patches-1.0.0-dev.8.mpp",
   "signature_download_url": "",
-  "version": "1.0.0-dev.7"
+  "version": "1.0.0-dev.8"
 }
