@@ -303,7 +303,7 @@ val deleteFolderFromTabsPatch = bytecodePatch(
 }
 
 /** Isolated low-register helpers preserve original registers and catch bridge failures as well. */
-private fun MutableClass.bridge(
+internal fun MutableClass.bridge(
     name: String, parameters: List<String>, registers: Int, body: String, invalidateBundle: Boolean = false,
 ): MutableMethod {
     check(methods.none { it.name == name }) { "Folder-tabs bridge already exists: $type->$name" }
