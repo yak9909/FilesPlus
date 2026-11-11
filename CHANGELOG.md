@@ -1,3 +1,13 @@
+## [1.0.0-dev.13](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.12...v1.0.0-dev.13) (2026-11-11)
+
+### ✨ New Features
+
+* Make the SMB share optional and list the server shares ([bfcd5e3](https://github.com/yak9909/FilesPlus/commit/bfcd5e309bdf236d7230c70fe821c3ed928cd1d3))
+
+### 🐛 Bug Fixes
+
+* Protect camera and screenshot folders from deletion and show exact counts ([250a8ad](https://github.com/yak9909/FilesPlus/commit/250a8ad7a34c7f9ed170d6d8365b85e1aa929624))
+
 ## [1.0.0-dev.12](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.11...v1.0.0-dev.12) (2026-11-11)
 
 ### 🐛 Bug Fixes
