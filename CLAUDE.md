@@ -37,7 +37,7 @@ Roles:
 - If a task is light enough that doing it directly costs fewer tokens than briefing a worker, Claude does it itself.
 
 Usage limit (usage-guard, account-wide):
-- Watch **only the 5-hour window**; weekly window is not watched. Threshold **80%** (`usage_guard.py set --five-hour 80 --weekly off`).
+- Thresholds: **5-hour window 80%**, **weekly window 95%** (`usage_guard.py set --five-hour 80 --weekly 95`).
 - When the guard notice (「【利用枠の見張り】…」) arrives: **graceful stop, not a hard kill** — start nothing new, let the running worker/build finish, reach a clean checkpoint (no half-applied edits; commit/merge only if reviewed), update `docs/HANDOFF.md`, and tell the user the progress and the next step. Continue only if the user says so.
 
 Rules (all workers):

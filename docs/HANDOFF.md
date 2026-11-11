@@ -18,7 +18,7 @@
 - 2026-11-11 から実装は **Claude のサブエージェント**（単純作業は Haiku 5.5、それ以外は Sonnet 5.5）が優先。Codex は予備（CLAUDE.md「Workers」）。
 - 動いているワーカーはなし。Codex の tabs セッションは削除済み。worktree `E:/Projects/ModdedFiles-wt/tabs`（`w/tabs`）は残っている。
 - ワーカーは**同時に1つまで**。
-- 利用枠の見張り: 5時間枠だけ 80% で中断処理（強制終了ではない。CLAUDE.md 参照）。
+- 利用枠の見張り: 5時間枠 80%・週間枠 95% で中断処理（強制終了ではない。CLAUDE.md 参照）。
 
 ## 再開したらやること（順番）
 1. Phase 3 に入る: §5.2（プレビュー中の複数選択）から。DESIGN を読み、ワーカーへの依頼文を作って Sonnet のサブエージェントに任せる（新しい worktree `ModdedFiles-wt/<name>`、ブランチ `w/<name>` を `dev` から作る）。
