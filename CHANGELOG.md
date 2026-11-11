@@ -1,3 +1,9 @@
+## [1.0.0-dev.11](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.10...v1.0.0-dev.11) (2026-11-11)
+
+### ✨ New Features
+
+* Add a read-only SMB documents provider ([2bca39f](https://github.com/yak9909/FilesPlus/commit/2bca39f1cd793438778341c9aba4abcee24d4cc1))
+
 ## [1.0.0-dev.10](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.9...v1.0.0-dev.10) (2026-11-11)
 
 ### ✨ New Features
