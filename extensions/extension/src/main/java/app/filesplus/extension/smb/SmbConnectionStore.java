@@ -83,6 +83,7 @@ public final class SmbConnectionStore {
             if (!editor.commit()) return false;
             // A pure rename or folder change keeps the live session.
             if (sessionChanged) SmbVfs.invalidate(c.id);
+            SmbDocumentsProvider.notifyRootsChanged();
             return true;
         } catch (JSONException e) {
             DiagLog.i(AREA, "Saved connections are unreadable; not overwriting them");
@@ -101,6 +102,7 @@ public final class SmbConnectionStore {
             for (int i = list.size() - 1; i >= 0; i--) if (list.get(i).id.equals(id)) list.remove(i);
             prefs.edit().putString(KEY_LIST, toJson(list)).remove(PW_PREFIX + id).apply();
             SmbVfs.invalidate(id);
+            SmbDocumentsProvider.notifyRootsChanged();
         } catch (JSONException e) {
             DiagLog.i(AREA, "Saved connections are unreadable; not deleting");
         } catch (Throwable t) {
@@ -153,7 +155,10 @@ public final class SmbConnectionStore {
                 list.set(i, updated);
                 changed = true;
             }
-            if (changed) prefs.edit().putString(KEY_LIST, toJson(list)).apply();
+            if (changed) {
+                prefs.edit().putString(KEY_LIST, toJson(list)).apply();
+                if (rename) SmbDocumentsProvider.notifyRootsChanged();
+            }
         } catch (JSONException e) {
             DiagLog.i(AREA, "Saved connections are unreadable; not updating them");
         } catch (Throwable t) {
