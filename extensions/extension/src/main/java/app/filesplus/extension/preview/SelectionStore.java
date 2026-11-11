@@ -38,6 +38,13 @@ public final class SelectionStore {
         return new ArrayList<>(SELECTED.values());
     }
 
+    /** Returns the selected entries (a copy) and clears the store in one step. */
+    public static synchronized List<Object> drain() {
+        List<Object> entries = new ArrayList<>(SELECTED.values());
+        SELECTED.clear();
+        return entries;
+    }
+
     public static synchronized void clear() {
         SELECTED.clear();
     }

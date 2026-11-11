@@ -160,6 +160,12 @@ val previewMultiSelectPatch = bytecodePatch(
             move-result v0
             return v0
         """.trimIndent())
+        // Page change: the same current-file read, handed to the overlay. Registers: v0 root, v2/v3 id, v4 has-id.
+        val pageBridge = peer.bridge("modKitPreviewPage", emptyList(), "V", 7, """
+            $loadCurrent
+            invoke-static {v0, v2, v3, v4}, $HOOK->onPageSelected(${VIEW}JZ)V
+            return-void
+        """.trimIndent())
         val fragmentBridge = fragment.bridge("modKitPreviewItem", listOf(MENU_ITEM), "Z", 3, """
             invoke-virtual {p0}, $peerAccessor
             move-result-object v0
@@ -180,11 +186,42 @@ val previewMultiSelectPatch = bytecodePatch(
             if-eqz v0, :original
             return v0
         """.trimIndent(), ExternalLabel("original", first))
+
+        // ViewPager2 page-change callback: the (I)V method that closes the delete / trash dialogs (their fragment
+        // tags are stable strings) and reads the current file through the peer, behind the peer's validity check.
+        val pageCallbackClass = mutableClassDefBy(classDefBy { cls -> cls.methods.any { isPageSelected(it, peer.type, current.name) } })
+        val onPage = pageCallbackClass.methods.single { isPageSelected(it, peer.type, current.name) }
+        val pageCode = onPage.code()
+        val currentIndex = pageCode.indexOfFirst { insn ->
+            (insn.ref() as? MethodReference)?.let {
+                insn.opcode == Opcode.INVOKE_VIRTUAL && it.definingClass == peer.type && it.name == current.name && it.parameterTypes.isEmpty()
+            } == true
+        }
+        need(currentIndex > 0) { "current-file read in page callback" }
+        need(pageCode.subList(0, currentIndex).any { insn ->
+            (insn.ref() as? MethodReference)?.let {
+                it.definingClass == peer.type && it.parameterTypes.isEmpty() && it.returnType == "Z"
+            } == true
+        }) { "validity check before the current-file read" }
+        val currentCall = pageCode[currentIndex] as FiveRegisterInstruction
+        val currentResult = pageCode[currentIndex + 1]
+        need(currentResult.opcode == Opcode.MOVE_RESULT_OBJECT) { "page callback result move" }
+        val pagePeerRegister = currentCall.registerC
+        need((currentResult as OneRegisterInstruction).registerA != pagePeerRegister) { "page callback peer register reuse" }
+        // After the app's own read (so only valid pages notify, and the early-return paths stay untouched).
+        (onPage as MutableMethod).addInstructions(
+            currentIndex + 2, "invoke-virtual/range {v$pagePeerRegister .. v$pagePeerRegister}, $pageBridge",
+        )
     }
 }
 
 private fun isPreviewMenuMethod(method: Method) =
     method.parameterTypes == listOf(MENU, MENU_INFLATER) && method.returnType == "V" && method.literal(PREVIEW_MENU_RES)
+
+private fun isPageSelected(method: Method, peerType: String, currentName: String) =
+    method.parameterTypes == listOf("I") && method.returnType == "V" &&
+        method.string("DELETE_DIALOG") && method.string("MOVE_TO_TRASH_DIALOG_TAG") &&
+        method.calls().any { it.definingClass == peerType && it.name == currentName && it.parameterTypes.isEmpty() }
 
 /** `boolean f(Entry)` that tests the id presence bit, else falls back to the content URI. */
 private fun isMediaIdCheck(method: Method, entryType: String) =
