@@ -30,6 +30,7 @@ import android.widget.Toast;
 import app.filesplus.extension.DiagLog;
 import app.filesplus.extension.ModKit;
 import app.filesplus.extension.ModSettings;
+import app.filesplus.extension.smb.SmbClientFactory;
 import app.filesplus.extension.smb.SmbConnection;
 import app.filesplus.extension.smb.SmbConnectionStore;
 import app.filesplus.extension.smb.SmbEntry;
@@ -67,6 +68,8 @@ public final class ModSettingsActivity extends Activity {
         EditText password;
         EditText domain;
         RadioButton openStart;
+        /** Reveals the optional fields (called when one of them has an error). */
+        Runnable showAdvanced;
     }
 
     @Override
@@ -251,7 +254,7 @@ public final class ModSettingsActivity extends Activity {
     private String smbSummary(SmbConnection c) {
         StringBuilder line = new StringBuilder(c.host);
         if (c.port != 445) line.append(':').append(c.port);
-        line.append('/').append(c.share);
+        if (c.hasShare()) line.append('/').append(c.share);
         if (!c.startPath.isEmpty()) line.append('/').append(c.startPath);
         line.append(" · ").append(c.user.isEmpty() ? tr("ゲスト", "Guest") : c.user);
         if (!c.user.isEmpty() && !SmbConnectionStore.hasPassword(c.id)) {
@@ -274,7 +277,7 @@ public final class ModSettingsActivity extends Activity {
         EditText input = new EditText(this);
         input.setSingleLine(true);
         input.setInputType(InputType.TYPE_CLASS_TEXT);
-        input.setHint(c.host + "/" + c.share);
+        input.setHint(c.hostAndShare());
         input.setText(c.displayName);
         input.selectAll();
         LinearLayout container = new LinearLayout(this);
@@ -309,18 +312,27 @@ public final class ModSettingsActivity extends Activity {
         form.setOrientation(LinearLayout.VERTICAL);
         form.setPadding(dp(24), dp(8), dp(24), 0);
         int plain = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
-        f.name = smbField(form, tr("表示名（任意）", "Display name (optional)"), InputType.TYPE_CLASS_TEXT);
+        // Host, user and password are enough; everything else is optional and sits under the expander.
         f.host = smbField(form, tr("ホスト（例: 192.168.0.10）", "Host (e.g. 192.168.0.10)"), plain | InputType.TYPE_TEXT_VARIATION_URI);
-        f.port = smbField(form, tr("ポート", "Port"), InputType.TYPE_CLASS_NUMBER);
-        f.share = smbField(form, tr("共有名（必須）", "Share name (required)"), plain);
-        f.start = smbField(form, tr("開始フォルダ（任意。例: Videos/2024）", "Start folder (optional, e.g. Videos/2024)"), plain);
         f.user = smbField(form, tr("ユーザー（空欄でゲスト）", "User (blank for guest)"), plain);
         f.password = smbField(form, tr("パスワード", "Password"),
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        f.domain = smbField(form, tr("ドメイン（任意）", "Domain (optional)"), plain);
+        TextView expander = text("", 16, accent);
+        expander.setPadding(0, dp(16), 0, dp(8));
+        form.addView(expander);
+        LinearLayout advanced = new LinearLayout(this);
+        advanced.setOrientation(LinearLayout.VERTICAL);
+        advanced.setVisibility(View.GONE);
+        form.addView(advanced);
+        f.name = smbField(advanced, tr("表示名（任意）", "Display name (optional)"), InputType.TYPE_CLASS_TEXT);
+        f.port = smbField(advanced, tr("ポート", "Port"), InputType.TYPE_CLASS_NUMBER);
+        f.share = smbField(advanced, tr("共有名（任意。空欄なら一覧から選ぶ）", "Share name (optional; blank lists the shares)"), plain);
+        f.start = smbField(advanced, tr("開始フォルダ（任意。例: Videos/2024。共有名が空なら 共有名/フォルダ）",
+                "Start folder (optional, e.g. Videos/2024; with no share name: share/folder)"), plain);
+        f.domain = smbField(advanced, tr("ドメイン（任意）", "Domain (optional)"), plain);
         TextView openLabel = text(tr("開く場所", "Open at"), 14, secondary);
         openLabel.setPadding(0, dp(12), 0, 0);
-        form.addView(openLabel);
+        advanced.addView(openLabel);
         RadioGroup open = new RadioGroup(this);
         f.openStart = new RadioButton(this);
         f.openStart.setText(tr("開始フォルダ", "Start folder"));
@@ -330,7 +342,20 @@ public final class ModSettingsActivity extends Activity {
         openLast.setTextColor(primary);
         open.addView(f.openStart);
         open.addView(openLast);
-        form.addView(open);
+        advanced.addView(open);
+        expander.setText(tr("▸ 詳細設定", "▸ Advanced"));
+        f.showAdvanced = () -> {
+            advanced.setVisibility(View.VISIBLE);
+            expander.setText(tr("▾ 詳細設定", "▾ Advanced"));
+        };
+        expander.setOnClickListener(v -> {
+            if (advanced.getVisibility() == View.VISIBLE) {
+                advanced.setVisibility(View.GONE);
+                expander.setText(tr("▸ 詳細設定", "▸ Advanced"));
+            } else {
+                f.showAdvanced.run();
+            }
+        });
         if (adding) {
             f.port.setText("445");
             openLast.setChecked(true);
@@ -344,6 +369,11 @@ public final class ModSettingsActivity extends Activity {
             f.domain.setText(existing.domain);
             f.openStart.setChecked(SmbConnection.OPEN_START.equals(existing.openWhere));
             openLast.setChecked(!f.openStart.isChecked());
+            // Show the optional fields at once when any of them holds a value.
+            if (!existing.displayName.isEmpty() || existing.port != SmbClientFactory.DEFAULT_PORT || existing.hasShare()
+                    || !existing.startPath.isEmpty() || !existing.domain.isEmpty() || f.openStart.isChecked()) {
+                f.showAdvanced.run();
+            }
         }
         TextView status = text("", 14, secondary);
         status.setTextIsSelectable(true);
@@ -383,7 +413,7 @@ public final class ModSettingsActivity extends Activity {
 
     /** Builds a connection from the form, or returns null after marking the invalid fields. */
     private SmbConnection readSmbForm(SmbForm f, SmbConnection existing) {
-        int port = validateSmbTarget(f.host, f.port, f.share);
+        int port = validateSmbTarget(f.host, f.port, f.share, false);
         String start = f.start.getText().toString();
         boolean valid = port >= 0;
         try {
@@ -392,7 +422,13 @@ public final class ModSettingsActivity extends Activity {
             f.start.setError(tr("「..」は使えません", "\"..\" is not allowed"));
             valid = false;
         }
-        if (!valid) return null;
+        if (!valid) {
+            // An error on a hidden optional field would otherwise go unnoticed.
+            if (f.port.getError() != null || f.share.getError() != null || f.start.getError() != null) {
+                f.showAdvanced.run();
+            }
+            return null;
+        }
         SmbConnection c = new SmbConnection(existing == null ? null : existing.id, f.name.getText().toString(),
                 f.host.getText().toString(), port, f.share.getText().toString(), start, f.user.getText().toString(),
                 f.domain.getText().toString(),
@@ -474,7 +510,15 @@ public final class ModSettingsActivity extends Activity {
             SmbVfs vfs = new SmbVfs(probe, password);
             List<SmbEntry> entries = vfs.list(probe.startPath);
             vfs.stat(probe.startPath);
-            StringBuilder result = new StringBuilder("OK: ").append(entries.size()).append(tr(" 件", " entries"));
+            // No share and no start folder: the entries are the server's shares.
+            boolean shareList = !probe.hasShare() && probe.startPath.isEmpty();
+            StringBuilder result = new StringBuilder("OK: ").append(entries.size())
+                    .append(shareList ? tr(" 件の共有", " shares") : tr(" 件", " entries"));
+            if (shareList && !entries.isEmpty()) {
+                result.append(" (");
+                for (int i = 0; i < entries.size() && i < 5; i++) result.append(i > 0 ? ", " : "").append(entries.get(i).name);
+                result.append(entries.size() > 5 ? ", …)" : ")");
+            }
             SmbEntry firstFile = null;
             for (SmbEntry entry : entries) {
                 if (!entry.isDir) {
@@ -504,6 +548,10 @@ public final class ModSettingsActivity extends Activity {
     private String smbErrorText(Throwable t) {
         String detail = " (" + SmbErrors.describe(t) + ")";
         if (SmbErrors.isPasswordMissing(t)) return tr("パスワードが読めません。入力し直してください", "Password unreadable, please re-enter");
+        if (SmbErrors.isShareListUnavailable(t)) {
+            return tr("サーバーが共有の一覧を返しませんでした。共有名を入力してください",
+                    "The server did not list its shares. Enter the share name") + detail;
+        }
         if (SmbErrors.isAuthFailure(t)) return tr("ユーザー名またはパスワードが違います", "Wrong user name or password") + detail;
         if (SmbErrors.hasStatus(t, "STATUS_BAD_NETWORK_NAME")) return tr("共有名が見つかりません", "Share not found") + detail;
         if (SmbErrors.isNotFound(t)) return tr("開始フォルダが見つかりません", "Start folder not found") + detail;
@@ -547,7 +595,7 @@ public final class ModSettingsActivity extends Activity {
         EditText password = smbField(form, tr("パスワード", "Password"),
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         EditText domain = smbField(form, tr("ドメイン（任意）", "Domain (optional)"), plain);
-        EditText share = smbField(form, tr("共有名（必須）", "Share name (required)"), plain);
+        EditText share = smbField(form, tr("共有名（任意。空欄なら共有の一覧を調べる）", "Share name (optional; blank lists the shares)"), plain);
         EditText path = smbField(form, tr("パス（任意。例: Videos/2024）", "Path (optional, e.g. Videos/2024)"), plain);
         ScrollView scroll = new ScrollView(this);
         scroll.addView(form);
@@ -556,7 +604,7 @@ public final class ModSettingsActivity extends Activity {
                 .setNegativeButton(tr("キャンセル", "Cancel"), null).create();
         dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
                 .setOnClickListener(v -> safely(() -> {
-                    int portValue = validateSmbTarget(host, port, share);
+                    int portValue = validateSmbTarget(host, port, share, false);
                     if (portValue < 0) return;
                     String hostValue = host.getText().toString().trim();
                     String shareValue = share.getText().toString().trim();
@@ -587,7 +635,7 @@ public final class ModSettingsActivity extends Activity {
     }
 
     /** Checks host, port and share; returns the port, or -1 after marking the invalid fields. */
-    private int validateSmbTarget(EditText host, EditText port, EditText share) {
+    private int validateSmbTarget(EditText host, EditText port, EditText share, boolean shareRequired) {
         int portValue;
         try {
             portValue = Integer.parseInt(port.getText().toString().trim());
@@ -605,8 +653,10 @@ public final class ModSettingsActivity extends Activity {
         }
         String shareValue = share.getText().toString().trim();
         if (shareValue.isEmpty()) {
-            share.setError(tr("共有名を入力してください", "Enter a share name"));
-            valid = false;
+            if (shareRequired) {
+                share.setError(tr("共有名を入力してください", "Enter a share name"));
+                valid = false;
+            }
         } else if (shareValue.indexOf('/') >= 0 || shareValue.indexOf('\\') >= 0) {
             share.setError(tr("共有名に / や \\ は使えません（フォルダは開始フォルダに入力）", "No / or \\ in the share name (use the start folder)"));
             valid = false;
