@@ -23,6 +23,12 @@ private const val VIEW = "Landroid/view/View;"
 private const val MENU = "Landroid/view/Menu;"
 private const val MENU_ITEM = "Landroid/view/MenuItem;"
 private const val MENU_INFLATER = "Landroid/view/MenuInflater;"
+private const val LIST = "Ljava/util/List;"
+private const val LIST_HANDOFF = "${Constants.EXT}preview/ListHandoff;"
+private const val SELECTION_TARGET = "${Constants.EXT}preview/SelectionTarget;"
+
+/** Saved-state key of the list screen's selection model; its class is the hand-off target. */
+private const val SELECTION_STATE_TAG = "SELECTED_DATA_STATE_TAG"
 
 /** R.menu.file_preview_menu: the preview screen's top-bar menu. */
 private const val PREVIEW_MENU_RES = 0x7f0f000eL
@@ -212,6 +218,47 @@ val previewMultiSelectPatch = bytecodePatch(
         (onPage as MutableMethod).addInstructions(
             currentIndex + 2, "invoke-virtual/range {v$pagePeerRegister .. v$pagePeerRegister}, $pageBridge",
         )
+
+        // Hand-off to the list: the selection model class is the one whose constructor creates the state
+        // holder under the saved-state key below (the same anchor the folder-tab patches use).
+        val modelTypes = mutableListOf<String>()
+        classDefForEach { cls ->
+            if (cls.methods.any { it.name == "<init>" && it.string(SELECTION_STATE_TAG) }) modelTypes.add(cls.type)
+        }
+        need(modelTypes.size == 1) { "selection model classes: ${modelTypes.size}" }
+        val model = mutableClassDefBy(modelTypes.single())
+        val constructor = model.methods.filter { it.name == "<init>" }.also { need(it.size == 1) { "selection model constructors: ${it.size}" } }.single()
+
+        // "Add these entries to the selection": (List, boolean)V that pushes the update to the list observers
+        // (the app's select-all and single-select paths call it with the same proto entries). false = no analytics event.
+        val addEntries = model.methods.filter {
+            it.parameterTypes == listOf(LIST, "Z") && it.returnType == "V" && it.string("SELECTION_DATA_SOURCE")
+        }.also { need(it.size == 1) { "selection model add methods: ${it.size}" } }.single()
+
+        // The merge step must work on the very same entry type the preview hands over.
+        var mergesPreviewEntries = false
+        classDefForEach { cls ->
+            if (cls.methods.any { m ->
+                    m.literal(MEDIA_ID_BIT) && m.code().any { insn ->
+                        insn.opcode == Opcode.CHECK_CAST && (insn.ref() as? TypeReference)?.type == entryType
+                    } && m.calls().any { it.definingClass == "Ljava/util/Set;" && it.name == "contains" }
+                }) mergesPreviewEntries = true
+        }
+        need(mergesPreviewEntries) { "no selection merge step for entry type $entryType" }
+
+        need(SELECTION_TARGET !in model.interfaces && model.methods.none { it.name == "modKitAddSelected" }) { "model already patched" }
+        model.interfaces.add(SELECTION_TARGET)
+        model.bridge("modKitAddSelected", listOf(LIST), "V", 3, """
+            const/4 v0, 0x0
+            invoke-virtual {p0, p1, v0}, $addEntries
+            return-void
+        """.trimIndent())
+
+        val returns = constructor.code().withIndex().filter { it.value.opcode == Opcode.RETURN_VOID }
+        need(returns.isNotEmpty()) { "selection model constructor without return" }
+        for ((index) in returns.reversed()) {
+            (constructor as MutableMethod).addInstructions(index, "invoke-static {p0}, $LIST_HANDOFF->registerModel(Ljava/lang/Object;)V")
+        }
     }
 }
 

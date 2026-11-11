@@ -14,6 +14,7 @@ import android.view.ViewTreeObserver;
 import android.view.WindowInsets;
 import android.widget.Toast;
 
+import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -31,6 +32,9 @@ public final class PreviewHooks {
     private static final int SELECT_ITEM = 0x7e505331;
     private static final int COUNT_ITEM = 0x7e505332;
 
+    /** The last gallery root that was shown, to clear its check mark when the store is handed over. */
+    private static WeakReference<View> lastRoot;
+
     private PreviewHooks() {}
 
     public static void hookError(Throwable t) {
@@ -45,6 +49,7 @@ public final class PreviewHooks {
         try {
             if (menu == null) return;
             Context context = root != null ? root.getContext() : ModKit.context();
+            ListHandoff.notePreviewActivity(activity(context));
             boolean ja = japanese(context);
             if (hasId && menu.findItem(SELECT_ITEM) == null) {
                 String title = SelectionStore.isSelected(id)
@@ -79,6 +84,20 @@ public final class PreviewHooks {
             hookError(t);
             return new ArrayList<>();
         }
+    }
+
+    /**
+     * The store was handed to the list: a preview screen that is still alive must not keep showing
+     * the check mark or the "Deselect" / "n selected" items.
+     */
+    static void onStoreDrained() {
+        try {
+            View root = lastRoot == null ? null : lastRoot.get();
+            if (root == null) return;
+            updateOverlay(root, 0L, false);
+            Activity activity = activity(root.getContext());
+            if (activity != null) activity.invalidateOptionsMenu();
+        } catch (Throwable t) { hookError(t); }
     }
 
     /** Cheap pre-check so the bridge only reads the current file for our own items. */
@@ -123,6 +142,7 @@ public final class PreviewHooks {
      */
     private static void updateOverlay(View root, long id, boolean hasId) {
         if (!(root instanceof ViewGroup)) return;
+        lastRoot = new WeakReference<>(root);
         ViewGroup group = (ViewGroup) root;
         boolean show = hasId && SelectionStore.isSelected(id);
         CheckBadge badge = null;
