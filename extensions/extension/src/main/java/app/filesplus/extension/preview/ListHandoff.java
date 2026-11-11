@@ -87,6 +87,11 @@ public final class ListHandoff implements Application.ActivityLifecycleCallbacks
         install();
     }
 
+    /** The preview Activity last recorded (null when gone). */
+    static Activity knownPreview() {
+        return preview == null ? null : preview.get();
+    }
+
     /** True when the preview instance we know of is finishing or gone (back / up pressed). */
     static boolean previewClosing() {
         Activity known = preview == null ? null : preview.get();

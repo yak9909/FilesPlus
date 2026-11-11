@@ -40,19 +40,26 @@ public final class MoveQueue {
 
     private MoveQueue() {}
 
+    /** Called once on the main thread when every job of one enqueue call has finished (moved, skipped or failed). */
+    public interface Done {
+        void onDone(int moved, int notMoved);
+    }
+
     /** One enqueue call: collects the results of its jobs and reports them once. */
     private static final class Batch {
         final Context app;
         final File destination;
+        final Done done;
         int pending;
         int moved;
         int skipped;
         int failed;
         boolean destinationLogged;
 
-        Batch(Context app, File destination, int pending) {
+        Batch(Context app, File destination, Done done, int pending) {
             this.app = app;
             this.destination = destination;
+            this.done = done;
             this.pending = pending;
         }
     }
@@ -71,30 +78,45 @@ public final class MoveQueue {
 
     /** Queues one move job per id. Call {@link #onPageChanged} with the current id first. */
     public static void enqueue(Context app, long[] ids, String[] mimes, File destination) {
+        enqueue(app, ids, mimes, destination, null);
+    }
+
+    /**
+     * Same, with a completion callback (main thread; must not capture an Activity or View strongly).
+     * Returns how many jobs are held until the user leaves their page (0 when nothing was queued).
+     */
+    public static int enqueue(Context app, long[] ids, String[] mimes, File destination, Done done) {
         try {
             // Prefer the application context so no Activity is kept alive by a queued job.
             Context context = ModKit.context();
             if (context == null && app != null) context = app.getApplicationContext();
             if (context == null) context = app;
-            if (context == null || ids == null || ids.length == 0 || destination == null) return;
+            if (context == null || ids == null || ids.length == 0 || destination == null) return 0;
             // One job per distinct id (first mime wins).
             Map<Long, String> unique = new LinkedHashMap<>();
             for (int i = 0; i < ids.length; i++) {
                 if (!unique.containsKey(ids[i])) unique.put(ids[i], mimes != null && i < mimes.length ? mimes[i] : null);
             }
-            Batch batch = new Batch(context, destination, unique.size());
+            Batch batch = new Batch(context, destination, done, unique.size());
             List<Job> now = new ArrayList<>();
+            int held = 0;
             synchronized (LOCK) {
                 for (Map.Entry<Long, String> entry : unique.entrySet()) {
                     Job job = new Job(batch, entry.getKey(), entry.getValue());
-                    if (isDeferrable(job) && job.id == currentId) deferred.add(job);
-                    else now.add(job);
+                    if (isDeferrable(job) && job.id == currentId) {
+                        deferred.add(job);
+                        held++;
+                    } else {
+                        now.add(job);
+                    }
                 }
             }
-            DiagLog.i(AREA, "Enqueued " + unique.size() + " item(s) to " + destination);
+            DiagLog.i(AREA, "Enqueued " + unique.size() + " item(s) to " + destination + ", held " + held);
             for (Job job : now) submit(job);
+            return held;
         } catch (Throwable t) {
             DiagLog.e(AREA, "enqueue failed", t);
+            return 0;
         }
     }
 
@@ -220,6 +242,18 @@ public final class MoveQueue {
             if (!done) return;
             if (totalMoved > 0) DestinationHistory.record(batch.destination.getPath());
             toast(batch.app, message(batch.destination, totalMoved, totalSkipped, totalFailed));
+            if (batch.done != null) {
+                // MediaStore was synced inside TabMove.move, so a reload from here no longer lists the moved files.
+                int notMoved = totalSkipped + totalFailed;
+                int movedCount = totalMoved;
+                new Handler(Looper.getMainLooper()).post(() -> {
+                    try {
+                        batch.done.onDone(movedCount, notMoved);
+                    } catch (Throwable t) {
+                        DiagLog.e(AREA, "completion callback failed", t);
+                    }
+                });
+            }
         } catch (Throwable t) {
             DiagLog.e(AREA, "finish failed", t);
         }

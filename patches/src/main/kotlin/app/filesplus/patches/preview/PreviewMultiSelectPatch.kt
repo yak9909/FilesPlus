@@ -36,11 +36,11 @@ private const val PREVIEW_MENU_RES = 0x7f0f000eL
 /** Presence bit of the MediaStore id in the app's file proto (not a name: it is the literal the app tests). */
 private const val MEDIA_ID_BIT = 131072L
 
-private fun Method.code() = implementation?.instructions?.toList().orEmpty()
-private fun Instruction.ref() = (this as? ReferenceInstruction)?.reference
-private fun Method.string(text: String) = code().any { (it.ref() as? StringReference)?.string == text }
-private fun Method.literal(value: Long) = code().any { (it as? WideLiteralInstruction)?.wideLiteral == value }
-private fun Method.calls() = code().mapNotNull { it.ref() as? MethodReference }
+internal fun Method.code() = implementation?.instructions?.toList().orEmpty()
+internal fun Instruction.ref() = (this as? ReferenceInstruction)?.reference
+internal fun Method.string(text: String) = code().any { (it.ref() as? StringReference)?.string == text }
+internal fun Method.literal(value: Long) = code().any { (it as? WideLiteralInstruction)?.wideLiteral == value }
+internal fun Method.calls() = code().mapNotNull { it.ref() as? MethodReference }
 
 private fun need(condition: Boolean, detail: () -> String) {
     if (!condition) throw PatchException("Multi-select in preview: unexpected ${detail()}")
@@ -275,9 +275,13 @@ private fun isMediaIdCheck(method: Method, entryType: String) =
     method.parameterTypes == listOf(entryType) && method.returnType == "Z" && method.literal(MEDIA_ID_BIT) &&
         method.calls().any { it.definingClass == "Landroid/net/Uri;" && it.name == "parse" }
 
-/** Low-register helper with a Throwable guard: a failing hook logs and falls back to the original behavior. */
-private fun MutableClass.bridge(
+/**
+ * Low-register helper with a Throwable guard: a failing hook logs and falls back to the original behavior.
+ * [guardFrom] leading instructions stay outside the guarded range (they may define registers that [onError] uses).
+ */
+internal fun MutableClass.bridge(
     name: String, parameters: List<String>, returns: String, registers: Int, body: String,
+    guardFrom: Int = 0, onError: String = "",
 ): MutableMethod {
     check(methods.none { it.name == name }) { "Preview bridge already exists: $type->$name" }
     val method = MutableMethod(ImmutableMethod(type, name,
@@ -289,10 +293,11 @@ private fun MutableClass.bridge(
     method.addInstructions(handler, """
         move-exception v0
         invoke-static {v0}, $HOOK->hookError(Ljava/lang/Throwable;)V
+        $onError
         $fallback
     """.trimIndent())
     method.implementation!!.apply {
-        addCatch("Ljava/lang/Throwable;", newLabelForIndex(0), newLabelForIndex(handler), newLabelForIndex(handler))
+        addCatch("Ljava/lang/Throwable;", newLabelForIndex(guardFrom), newLabelForIndex(handler), newLabelForIndex(handler))
     }
     methods.add(method)
     return method
