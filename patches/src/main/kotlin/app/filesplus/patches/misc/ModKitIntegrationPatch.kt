@@ -25,7 +25,9 @@ private const val PREFERENCE = "Landroidx/preference/Preference;"
 private const val CONTEXT = "Landroid/content/Context;"
 private const val INTENT = "Landroid/content/Intent;"
 private const val SETTINGS_ACTIVITY = "app.filesplus.extension.settings.ModSettingsActivity"
-private const val HOOKS = "${Constants.EXT}settings/SettingsHooks;"
+private const val SMB_PROVIDER = "app.filesplus.extension.smb.SmbDocumentsProvider"
+private const val SMB_AUTHORITY_SUFFIX = ".smb.documents"
+private const val HOOKS ="${Constants.EXT}settings/SettingsHooks;"
 
 private val modKitManifestPatch = resourcePatch {
     execute {
@@ -44,6 +46,27 @@ private val modKitManifestPatch = resourcePatch {
             val theme = settings.getAttribute("android:theme")
             if (theme.isNotEmpty()) activity.setAttribute("android:theme", theme)
             application.appendChild(activity)
+
+            // SMB DocumentsProvider. The authority follows the package attribute, so it stays right whether the
+            // package rename ran before this patch (new package) or after it (rewritten like any other authority).
+            val providers = application.getElementsByTagName("provider")
+            val hasSmbProvider = (0 until providers.length).any {
+                (providers.item(it) as Element).getAttribute("android:name") == SMB_PROVIDER
+            }
+            if (!hasSmbProvider) {
+                val provider = manifest.createElement("provider")
+                provider.setAttribute("android:name", SMB_PROVIDER)
+                provider.setAttribute("android:authorities", manifest.documentElement.getAttribute("package") + SMB_AUTHORITY_SUFFIX)
+                provider.setAttribute("android:exported", "true")
+                provider.setAttribute("android:grantUriPermissions", "true")
+                provider.setAttribute("android:permission", "android.permission.MANAGE_DOCUMENTS")
+                val filter = manifest.createElement("intent-filter")
+                val action = manifest.createElement("action")
+                action.setAttribute("android:name", "android.content.action.DOCUMENTS_PROVIDER")
+                filter.appendChild(action)
+                provider.appendChild(filter)
+                application.appendChild(provider)
+            }
         }
     }
 }
