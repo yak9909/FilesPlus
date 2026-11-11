@@ -442,7 +442,8 @@ public final class FolderTabContext {
         final Runnable clear = clearSelection.get();
         busy = true;
         updateMenu();
-        WORKER.execute(() -> {
+        // File-changing work shares one thread with the move queue, so two moves never run at once.
+        TabMove.fileExecutor().execute(() -> {
             TabMove.Result result = new TabMove.Result();
             try {
                 result = TabMove.move(app, sources, destination);
@@ -473,6 +474,7 @@ public final class FolderTabContext {
         if (result.failed > 0) text.append(ja ? "（失敗 " + result.failed + " 件）" : " (" + result.failed + " failed)");
         if (result.skipped > 0) text.append(ja ? "（移動済み " + result.skipped + " 件を除く）"
                 : " (" + result.skipped + " already there)");
+        if (result.crossVolume > 0) text.append('\n').append(TabMove.crossVolumeNote(ja));
         return text.toString();
     }
 
@@ -551,7 +553,7 @@ public final class FolderTabContext {
      */
     private void trash(Context context, File folder, String key, long fileCount, long totalBytes) {
         deleting = true;
-        WORKER.execute(() -> {
+        TabMove.fileExecutor().execute(() -> {
             final int[] refused = {0}; // 0 = allowed, 1 = protected, 2 = changed or removed.
             final FolderTrash.Result[] moved = {null};
             final FolderTrash.Failure[] failure = {null};
@@ -683,7 +685,7 @@ public final class FolderTabContext {
         return null;
     }
 
-    private static List<File> roots(Context context) throws IOException {
+    static List<File> roots(Context context) throws IOException {
         List<File> roots = new ArrayList<>();
         roots.add(Environment.getExternalStorageDirectory().getCanonicalFile());
         StorageManager manager = context.getSystemService(StorageManager.class);
@@ -730,7 +732,7 @@ public final class FolderTabContext {
      * camera/screen-capture rules are for deletion only: with {@code deletion} false (folder tabs)
      * only the volume root, Android/, .FilesPlus and the top-level standard folders match.
      */
-    private static boolean protectedPath(File folder, List<File> roots, boolean deletion) {
+    static boolean protectedPath(File folder, List<File> roots, boolean deletion) {
         for (File volume : roots) {
             String base = volume.getPath();
             String path = folder.getPath();
