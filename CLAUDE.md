@@ -26,15 +26,29 @@ Talk to the user in Japanese.
 
 ## Workers: Claude subagents first (since 2026-11-11, user instruction)
 Roles:
-- **Claude (Opus 5.5, main session)**: design, task breakdown, review, and integration. Design decisions go into `docs/DESIGN.md`.
-- **Workers implement. Prefer Claude subagents** (Agent tool, `model` override):
-  - `haiku` (Haiku 5.5) — simple/mechanical work (renames, boilerplate, resource XML, repetitive edits).
+- **Main session** (the model the session runs on; currently Sonnet 5.5, advisor = Opus 5.5): coordination — design, task breakdown, dispatch, build/verify, integration. Design decisions go into `docs/DESIGN.md` (the spec; do not move it to `docs/superpowers/specs/`). Switch the main session to Opus (`/model`) only for design-heavy planning (e.g. SMB, libVLC engine abstraction), then switch back.
+- **Workers implement. Prefer Claude subagents** (Agent tool; **always pass `model` explicitly**):
+  - `haiku` (Haiku 5.5) — only when the brief can state the exact edits (renames, boilerplate, resource XML, repetitive edits). Haiku takes more turns on judgment work.
   - `sonnet` (Sonnet 5.5) — everything else (patch logic, fingerprints, smali, Android code).
-  - Effort: Claude (main) decides per task (`effort: low|medium|high|xhigh`).
-  - Brief them with `docs/WORKER_BRIEF.md` + the task prompt (English). They work in a worktree under `E:/Projects/ModdedFiles-wt/<name>` (branch `w/<name>`), do not commit, and reply with changed files + a short summary.
-  - Continue a running/finished subagent with SendMessage when its context is still useful; otherwise start a new one.
-- **Codex CLI workers are a fallback only** (e.g. when Claude usage is tight). Procedure below.
-- If a task is light enough that doing it directly costs fewer tokens than briefing a worker, Claude does it itself.
+  - Effort: main session decides per task (`effort: low|medium|high|xhigh`).
+  - Brief them with `docs/WORKER_BRIEF.md` + the task prompt (English). They work in a worktree under `E:/Projects/ModdedFiles-wt/<name>` (branch `w/<name>`, location is our declared preference), do not commit, and reply with changed files + a short summary. Hand large inputs over as files, not pasted text.
+  - Continue a running/finished subagent with SendMessage when its context is still useful; otherwise start a new one. After 3 failed fix rounds, start a fresh implementer on a stronger model.
+- **Codex workers are a fallback only** (e.g. when Claude usage is tight): the Codex plugin agent `codex:codex-rescue`, or our CLI launcher (procedure below). Keep the Codex stop-time review gate (`codex:setup`) OFF.
+- If a task is light enough that doing it directly costs fewer tokens than briefing a worker, the main session does it itself.
+
+Process (superpowers skills are installed; user rules below override the skills):
+- New feature with unclear requirements → `superpowers:brainstorming` (short). Items already specified in `DESIGN.md` skip it.
+- Multi-task feature (e.g. §5.2, SMB, libVLC) → `superpowers:writing-plans`, saved to `docs/plans/YYYY-MM-DD-<name>.md` (user location). Keep plans small: tasks, files, interfaces — not code transcripts. Single small tasks only need a task prompt.
+- Execution → `superpowers:subagent-driven-development` principles: fresh implementer per task, one at a time. During a multi-task plan keep a ledger in `.superpowers/sdd/` (git-ignored) in addition to `docs/HANDOFF.md`.
+- Completion → `superpowers:verification-before-completion`: never claim done/passing without fresh evidence (`bash scripts/build.sh --no-daemon` + `build/verify/` applying all patches to the original APK). Do not trust a worker's success report; check the diff.
+- Not used: `planning-with-files` (overlaps HANDOFF.md/WORKERS.md; its hooks add noise).
+- No unit tests exist yet. smali hooks are verified by build + patch application only. Pure-Java logic in extensions may get JVM tests later (undecided).
+
+Review (separate reviewer subagent, per `superpowers:requesting-code-review`; the main session does not review diffs inline):
+- Default reviewer model is **Opus 5.5** for per-task reviews and for the final whole-branch review. Use Sonnet only for trivial diffs (resource XML, strings) and for scoped re-reviews of small fix diffs.
+- Hand the reviewer the diff as a file (`git diff` of the worktree, since workers do not commit), plus the task prompt/requirements. Do not pre-judge findings.
+- Fix Critical/Important findings before merge by resuming the implementer (the main session does not fix them itself); note Minor ones in HANDOFF.md.
+- Reviews cost usage: the usage-guard limits below always win — stop gracefully instead of downgrading review quality.
 
 Usage limit (usage-guard, account-wide):
 - Thresholds: **5-hour window 80%**, **weekly window 95%** (`usage_guard.py set --five-hour 80 --weekly 95`).
@@ -43,7 +57,8 @@ Usage limit (usage-guard, account-wide):
 Rules (all workers):
 - **Communicate with workers in English** (prompts and requested replies). Ask for short replies: changed files + a summary, no full diffs.
 - Track active workers (subagent name/ID or Codex session id, model, purpose, status) in `docs/WORKERS.md` so they survive `/clear`.
-- Claude reviews every worker result (build + diff review) before committing.
+- Every worker result is reviewed (build + reviewer subagent, see Review above) before the main session commits it (`feat:`/`fix:`/`chore:` message; one commit per task so CI does not make extra releases).
+- The usage guard and the user's rules override superpowers' "do not stop between tasks": stopping at the guard threshold, merge/push/release rules, and the user's batched on-device testing stay as written here.
 - **Run at most 1 worker at a time** (the user's PC gets slow). 2 in parallel only when really needed. Never 3+.
 
 Codex fallback:

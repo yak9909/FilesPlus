@@ -1,6 +1,6 @@
 # Worker sessions
 
-Active workers (see CLAUDE.md "Workers"). Claude subagents (Sonnet/Haiku) are preferred; Codex is a fallback.
+Active workers and reviewers (see CLAUDE.md "Workers" / "Review"). Claude subagents (Sonnet/Haiku implement, Opus reviews) are preferred; Codex is a fallback. Always pass `model` explicitly when dispatching.
 Delete a session with `codex delete --force <id>` when its context is no longer needed, and remove its row.
 
 | Session ID | Model / effort | Purpose | Status |

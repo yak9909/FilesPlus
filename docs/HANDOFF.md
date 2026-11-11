@@ -15,14 +15,15 @@
 - ローカルビルド: `bash scripts/build.sh --no-daemon`（表示される mpp 名は最新のもの）。
 
 ## ワーカーの状態
-- 2026-11-11 から実装は **Claude のサブエージェント**（単純作業は Haiku 5.5、それ以外は Sonnet 5.5）が優先。Codex は予備（CLAUDE.md「Workers」）。
+- 2026-11-11 から実装は **Claude のサブエージェント**（Haiku 5.5 は変更内容を書き切れる単純作業だけ、それ以外は Sonnet 5.5）が優先。Codex は予備（CLAUDE.md「Workers」）。
+- superpowers を導入（2026-11-11）。運用は CLAUDE.md の「Process」「Review」に書いた。要点: メインは今のセッションのモデル（Sonnet 5.5、助言 Opus 5.5）。レビューは別のサブエージェントで、既定は Opus 5.5（小さな差分と再確認だけ Sonnet）。複数タスクの機能は `docs/plans/` に計画書。多段の計画では `.superpowers/sdd/` に台帳（git 管理外）。planning-with-files と Codex の stop-time review gate は使わない。
 - 動いているワーカーはなし。Codex の tabs セッションは削除済み。worktree `E:/Projects/ModdedFiles-wt/tabs`（`w/tabs`）は残っている。
 - ワーカーは**同時に1つまで**。
 - 利用枠の見張り: 5時間枠 80%・週間枠 95% で中断処理（強制終了ではない。CLAUDE.md 参照）。
 
 ## 再開したらやること（順番）
-1. Phase 3 の §5.2（プレビュー中の複数選択）は**短い段階に分けて進める**（ユーザー指示）。①調査は済み（結果は DESIGN §5.2 の「調査結果」）。次は②`SelectionStore` とプレビューのメニュー。依頼文を作って Sonnet のサブエージェントに任せる（新しい worktree `ModdedFiles-wt/preview`、ブランチ `w/preview` を `dev` から作る）。そのあと③チェック印と一覧への引き継ぎ。
-2. 終わったらレビュー → worktree でコミット（`feat:`）→ `dev` にマージ → `bash scripts/build.sh --no-daemon` → `build/verify/` で全パッチを当てて確認（base.apk は `original/*.apkm` から取り出す）→ `git pull --no-rebase origin dev` → push → プレリリース。
+1. Phase 3 の §5.2（プレビュー中の複数選択）は**短い段階に分けて進める**（ユーザー指示）。①調査は済み（結果は DESIGN §5.2 の「調査結果」）。まず `superpowers:writing-plans` で §5.2 の計画書（`docs/plans/`）を書く（②③の2タスク）。次は②`SelectionStore` とプレビューのメニュー。Sonnet の実装者に任せ、Opus のレビュー担当が見る（新しい worktree `ModdedFiles-wt/preview`、ブランチ `w/preview` を `dev` から作る）。そのあと③チェック印と一覧への引き継ぎ。
+2. 終わったら Opus のレビュー担当に差分を見せる（指摘を直してから）→ worktree でコミット（`feat:`）→ `dev` にマージ → `bash scripts/build.sh --no-daemon` → `build/verify/` で全パッチを当てて確認（base.apk は `original/*.apkm` から取り出す）→ `git pull --no-rebase origin dev` → push → プレリリース。
 3. 実機確認はユーザーが最後にまとめて行うので、それまでは実装を進めてよい。
 
 ## このあとの実装順（DESIGN.md §7）

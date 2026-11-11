@@ -141,4 +141,5 @@ local.properties
 original/
 analysis/
 worker-logs/
+.superpowers/
 build/
