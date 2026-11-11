@@ -1,31 +1,49 @@
-# 引き継ぎメモ（最終更新: 2026-11-11 08:30）
+# 引き継ぎメモ（最終更新: 2026-11-11 12:35）
 
 /clear のあとに作業を再開するためのメモ。まず `CLAUDE.md`（運用ルール）と `docs/WORKERS.md`（ワーカーのセッション）を読むこと。
 
 ## 現在の状況
-- 設計は `docs/DESIGN.md` v0.6。**Phase 0〜1 の実装が終わり、`dev` に統合済み**。
-- 最初のプレリリース **v1.0.0-dev.1** を公開済み（`patches-1.0.0-dev.1.mpp`）。
-  - 表示されるパッチ: Change package name / Custom skip duration / High-resolution playback（どれも既定で有効）。
-  - 隠しパッチ: ModKit 統合（`Files_Application.onCreate` で初期化し、Files の設定の「概要」の上に「Mod 設定」を追加。Mod 設定にはスキップ秒数と診断画面がある）。
-- 動作中のワーカーはなし。worktree とブランチ `w/*` は削除済み。
-- ローカルビルド: `bash scripts/build.sh`（失敗したら `--no-daemon` を付ける。理由は WORKERS.md）。
-- まだ確かめていないこと: 実機での動作全般。全パッチをまとめて元の APK に当てる確認はしていない（各パッチは単独で確認済み）。
+- プロジェクト名は **FilesPlus**（2026-11-11 に ModdedFiles から改名）。GitHub: https://github.com/yak9909/FilesPlus 。ローカルのフォルダ名は `E:/Projects/ModdedFiles` のまま（変えない）。
+- 設計は `docs/DESIGN.md` v0.7。Phase 0〜1 は実装済みで `dev` に統合済み。
+- 公開済みのプレリリース: v1.0.0-dev.1 〜 dev.3（dev.3 = 診断画面にアプリの ABI 表示、音声トラックのログ表記の修正）。
+  - 表示されるパッチ: Change package name（既定のアプリ名 FilesPlus）/ Custom skip duration / High-resolution playback。
+  - 隠しパッチ: ModKit 統合（Files の設定の「概要」の上に「Mod 設定」。スキップ秒数と診断画面）。
+- 実機確認の結果（OPPO A54 5G）: パッチ適用・起動・診断画面 OK。2K（1596x1996）は再生 OK。4K はカクつく。VLC はハードウェアアクセラレーション無効でも滑らか → 4K は **libVLC エンジン**で対応すると決定（DESIGN §5.5 の 0.7、Phase 5）。ただし **Phase 2 を先に**やる（ユーザー判断）。
+- ローカルビルド: `bash scripts/build.sh --no-daemon`（ワーカーが残した Gradle デーモンのせいで AccessDenied になるため。WORKERS.md 参照）。
 
-## 次にやること（2026-11-11 時点）
-- 実機確認の結果: 2K（1596x1996）は再生 OK。4K はカクつく。VLC はハードウェアアクセラレーション無効でも滑らか → 4K は **libVLC エンジン**で対応すると決定（DESIGN §5.5 の 0.7）。ただし **Phase 2 を先に**やる（ユーザー判断）。
-- Phase 2 はワーカー1つずつ順番に:
-  1. `tabs`（実行中）: フォルダタブの共通部品＋フォルダごと削除（§5.7・§5.8）。依頼文 `worker-logs/prompts/tabs.md`、worktree `../ModdedFiles-wt/tabs`。
-  2. 空フォルダのタブ表示（§5.9）
-  3. 現在のタブへ移動（§5.10）
-- 小さな修正（自分でやる）: 診断ログで音声の情報も「Video input」と出る件、診断画面にアプリのプロセスの ABI（32/64bit）を出す件。
-- その後: 全パッチをまとめて元の APK に当てる検証ツール、Phase 5 の libVLC エンジン（ネイティブライブラリを APK に足せるかの調査から）。
+## ワーカー（Codex）の状態
+- **Codex の利用枠は 0**。リセットは **2026-11-11 12:44**（Codex のエラー文 "try again at 12:44 PM" で確認）。それまでワーカーは使えない。
+- `tabs` ワーカー（セッション `01a1c8a6-b6d8-72a3-b155-9b8db5ce9f57`、gpt-6.1-sol / high）: フォルダタブの共通部品＋フォルダごと削除（§5.7・§5.8）。**起動直後に利用枠で止まり、まだ何も実装していない**。
+  - worktree `E:/Projects/ModdedFiles-wt/tabs`（ブランチ `w/tabs`、dev の 85bc962 から作成。dev より少し古いが、マージで問題ない）。
+  - 依頼文 `worker-logs/prompts/tabs.md`。再開は**最初の依頼文をもう一度渡す**:
+    `bash scripts/codex-worker.sh resume tabs 01a1c8a6-b6d8-72a3-b155-9b8db5ce9f57 worker-logs/prompts/tabs.md`（background で実行）
+- ワーカーは**同時に1つまで**（ユーザーの PC が重くなるため。必要なときだけ2つ）。
+
+## 再開の予約
+- CronCreate で **2026-11-11 12:47 に1回だけ**「HANDOFF.md・CLAUDE.md・WORKERS.md を読んで作業を再開」する予約を入れてある（ジョブ ID `9a774ecc`）。
+- この予約は **/clear では消えない**（ユーザー確認済み）。**Claude を終了すると消える**ので、その場合はユーザーに手動で再開を頼んでもらう。
+- 確認・取り消し: CronList / CronDelete。
+
+## 再開したらやること（順番）
+1. `tabs` ワーカーを上のコマンドで再開する（Codex が使えるか確認してから）。
+2. 待っている間に、Claude 自身で **新しい要望: 再生位置が n 秒未満でも巻き戻せるオプション**（DESIGN §5.1 の 0.7 追加）を実装する。ワーカーを使わず自分でやってよい（Codex の枠を tabs に回すため。重すぎるなら tabs の後でワーカーに頼む）。
+   - jadx で元アプリの巻き戻しの位置チェック（ボタン: `jpy` の rewind の case 付近、ダブルタップ: `kwd.b(MotionEvent)`、`VideoControlView` でボタンを無効にする箇所）を確認する。
+   - 設定キー `skip.rewindToStart` を `ModSettings` に追加し、Mod 設定のスキップ欄に切り替えを足す。ON のとき「現在位置 − n 秒」が負なら 0 秒へシークする。
+   - 既存パッチ `patches/src/main/kotlin/app/filesplus/patches/seek/CustomSkipDurationPatch.kt` と `extensions/.../seek/SkipHooks.java` に追加する。`feat:` でコミット。
+3. `tabs` が終わったらレビュー → worktree でコミット → `dev` にマージ → `bash scripts/build.sh --no-daemon` → push（`feat:` ならプレリリースが出る）→ ユーザーに日本語で報告。
+4. Phase 2 の残り（1つずつ）: 空のフォルダのタブ表示（§5.9）→ 現在のタブへ移動（§5.10）。
+5. その後: 全パッチをまとめて元の APK に当てる検証ツール（worker が `build/` に残した `VerifyModKit.java` などが参考）、Phase 5 の libVLC エンジン（APK にネイティブライブラリを足せるかの調査、32bit 版 APK で間に合うか。診断の「アプリの ABI」を見る）。
 
 ## このあとの実装順（DESIGN.md §7）
-- Phase 2: 共通基盤（VFS / FileOps / JobQueue / History）、フォルダタブ共通部品（§5.7）、フォルダごと削除（§5.8）、空フォルダのタブ表示（§5.9）、現在のタブへ移動（§5.10）
+- Phase 2: フォルダタブ共通部品（§5.7）、フォルダごと削除（§5.8）、空フォルダのタブ表示（§5.9）、現在のタブへ移動（§5.10）。JobQueue は Phase 3 で導入（§5.8 の 0.7）。
 - Phase 3: プレビュー中の複数選択（§5.2）、移動キュー（§5.4）
 - Phase 4: SMB（ブラウザ・provider・サムネイルキャッシュ・接続先保存、§5.3）
-- Phase 5〜6: 再生エンジン抽象化・L4・GIF シーク・その他形式
+- Phase 5: 再生エンジン抽象化・**libVLC エンジン（4K）**・GIF シーク
+- Phase 6: libVLC でのその他の形式、必要なら L4・L3
 
 ## 注意
-- 作業フォルダの git で `error: daemon terminated` が出ることがある（fsmonitor）。無視してよいが、`git worktree add` が固まったら git プロセスを止めて作り直す。
+- 作業フォルダの git で `error: daemon terminated` が出ることがある（fsmonitor）。無視してよい。
+- `codex exec resume` には `-C` がないので、launcher が worktree に `cd` してから実行する。**ワーカー実行中に `scripts/codex-worker.sh` を編集しない**（bash が読み直して壊れる）。
+- `codex delete` は `--force` が必要（非対話のため）。
+- Python の heredoc で日本語を含む文字列を置換しようとして、一致せず失敗したことがある（原因は未確定）。日本語を含む短い編集は Edit ツールで行う。
 - 解析用の逆コンパイル結果は `analysis/`（git 管理外）。難読化名はこの版（versionCode 2081362）専用。
