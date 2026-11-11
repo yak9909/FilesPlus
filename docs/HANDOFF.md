@@ -1,4 +1,4 @@
-# 引き継ぎメモ（最終更新: 2026-11-11 19:55）
+# 引き継ぎメモ（最終更新: 2026-11-11 22:10）
 
 /clear のあとに作業を再開するためのメモ。まず `CLAUDE.md`（運用ルール）と `docs/WORKERS.md`（ワーカーのセッション）を読むこと。
 
@@ -17,13 +17,20 @@
 ## ワーカーの状態
 - 2026-11-11 から実装は **Claude のサブエージェント**（Haiku 5.5 は変更内容を書き切れる単純作業だけ、それ以外は Sonnet 5.5）が優先。Codex は予備（CLAUDE.md「Workers」）。
 - superpowers を導入（2026-11-11）。運用は CLAUDE.md の「Process」「Review」に書いた。要点: メインは今のセッションのモデル（Sonnet 5.5、助言 Opus 5.5）。レビューは別のサブエージェントで、既定は Opus 5.5（小さな差分と再確認だけ Sonnet）。複数タスクの機能は `docs/plans/` に計画書。多段の計画では `.superpowers/sdd/` に台帳（git 管理外）。planning-with-files と Codex の stop-time review gate は使わない。
-- 動いているワーカーはなし。Codex の tabs セッションは削除済み。worktree `E:/Projects/ModdedFiles-wt/tabs`（`w/tabs`）は残っている。
+- 動いているワーカーはなし（利用枠の閾値の手前で止めた）。Codex の tabs セッションは削除済み。worktree `E:/Projects/ModdedFiles-wt/tabs`（`w/tabs`）と `E:/Projects/ModdedFiles-wt/preview`（`w/preview`）が残っている。
 - ワーカーは**同時に1つまで**。
 - 利用枠の見張り: 5時間枠 80%・週間枠 95% で中断処理（強制終了ではない。CLAUDE.md 参照）。
 
 ## 再開したらやること（順番）
-1. Phase 3 の §5.2（プレビュー中の複数選択）は**短い段階に分けて進める**（ユーザー指示）。①調査は済み（結果は DESIGN §5.2 の「調査結果」）。まず `superpowers:writing-plans` で §5.2 の計画書（`docs/plans/`）を書く（②③の2タスク）。次は②`SelectionStore` とプレビューのメニュー。Sonnet の実装者に任せ、Opus のレビュー担当が見る（新しい worktree `ModdedFiles-wt/preview`、ブランチ `w/preview` を `dev` から作る）。そのあと③チェック印と一覧への引き継ぎ。
-2. 終わったら Opus のレビュー担当に差分を見せる（指摘を直してから）→ worktree でコミット（`feat:`）→ `dev` にマージ → `bash scripts/build.sh --no-daemon` → `build/verify/` で全パッチを当てて確認（base.apk は `original/*.apkm` から取り出す）→ `git pull --no-rebase origin dev` → push → プレリリース。
+1. **§5.2 の修正ラウンド（利用枠 76% で中断した続き）**。計画書 `docs/plans/2026-11-11-preview-multiselect.md`（タスク1〜3）。タスク1〜3は worktree `E:/Projects/ModdedFiles-wt/preview`（`w/preview`、コミット `c3ebb16` `30527c7` `040ad54`）に実装済み。ビルドと全パッチの適用は私の手元で成功済み。タスク3のレビュー（Opus）で Critical なし、Important 4件が残っている。**`dev` にはまだマージしていない**（この4件で選択が失われる経路があるため。直してからマージ）。
+   - Important 1: 回転して戻ったとき、一覧のモデルが resume より後に作られると選択が失われる（`ListHandoff.java:97-115`）。直し方: `registerModel` で、ストアが空でなくプレビューが終了済みなら `handOver(current)` を post する。
+   - Important 2: `isPreview` がプレビューのインスタンスへの弱参照に頼っている（`:84-87`, `:128-129`）。低メモリや「アクティビティを保持しない」で、戻ったときにプレビュー自身の（使われない）モデルに渡してしまう。直し方: プレビューの `Class<?>` を強参照で持ち、終了判定だけ弱参照のインスタンスで行う。
+   - Important 3: プレビュー内で削除／ゴミ箱にしたファイルが、選択に残ったまま渡される。直し方: 削除・ゴミ箱の箇所で今のエントリを外す（`DELETE_DIALOG` / `MOVE_TO_TRASH_DIALOG_TAG` のページコールバック付近）。難しければ実機確認項目に回す。
+   - Important 4: 新しいプレビューを開いた後で、古いプレビューの destroy が選択を消す（`:110-113`）。直し方: クリアの前に `preview.get() == activity` を確かめる。
+   - Minor: `invoke-static {p0}` を `/range` に（`PreviewMultiSelectPatch.kt:260`）、マージ確認のスキャンを軽くする、`installed` の同期、使われなくなった `takePendingForList()` の削除、パッチの description に一覧への引き継ぎを書く。
+   - 手順: 実装者（Sonnet）に上の Important を直させる → 直した差分だけを Sonnet か Opus で再確認 → ビルドと `build/verify/` 相当で全パッチ適用 → `dev` にマージ → `git pull --no-rebase origin dev` → push → プレリリース → DESIGN §5.2 の状態を更新（`SelectionStore` は id→エントリで、content URI だけのファイルは選べない／ブリッジは `s(List,false)`／所有する Activity にだけ渡す、という実装の判断を書く）。
+   - 実機で確かめること: プレビューで2〜3件選んで戻ると一覧で選択されている／回転して戻っても同じ／2回目のプレビューに古い印が出ない／ファイル情報を開いて戻っても選択が保たれる／検索・カテゴリ・ホームから開いたプレビュー／外部アプリから開いたプレビュー／一覧での選択が従来どおり動く。
+2. その後は Phase 3 の移動キュー（§5.4）。
 3. 実機確認はユーザーが最後にまとめて行うので、それまでは実装を進めてよい。
 
 ## このあとの実装順（DESIGN.md §7）

@@ -5,7 +5,7 @@ Delete a session with `codex delete --force <id>` when its context is no longer 
 
 | Session ID | Model / effort | Purpose | Status |
 |------------|----------------|---------|--------|
-| subagent a7bdbd630b3e83292 | Claude sonnet / high | `preview` Task 1 (SelectionStore + preview menu), plan `docs/plans/2026-11-11-preview-multiselect.md`, worktree `../ModdedFiles-wt/preview`, branch `w/preview` | Running (started 2026-11-11). Next: Opus reviewer, then Task 2. |
+| subagent aa7c80773a938c7a5 | Claude sonnet / high | `preview` Task 3 (hand-off of the selection to the list), plan `docs/plans/2026-11-11-preview-multiselect.md`, worktree `../ModdedFiles-wt/preview`, branch `w/preview` | Idle (stopped at the usage threshold). Tasks 1-3 committed on `w/preview` (c3ebb16, 30527c7, 040ad54), built + patched OK. Opus review of Task 3: no Critical, 4 Important open (see HANDOFF.md). Resume this agent with SendMessage to fix them; then re-review and merge to dev. |
 | (none) | | | Codex `tabs` session deleted. Worktree `../ModdedFiles-wt/tabs` (branch `w/tabs`) can be removed. |
 
 Launcher: `scripts/codex-worker.sh` (start/resume). Prompts and logs: `worker-logs/` (git-ignored).
