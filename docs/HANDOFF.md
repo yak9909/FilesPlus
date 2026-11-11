@@ -1,28 +1,32 @@
-# 引き継ぎメモ（最終更新: 2026-11-11 13:40）
+# 引き継ぎメモ（最終更新: 2026-11-11 18:55）
 
 /clear のあとに作業を再開するためのメモ。まず `CLAUDE.md`（運用ルール）と `docs/WORKERS.md`（ワーカーのセッション）を読むこと。
 
 ## 現在の状況
 - プロジェクト名は **FilesPlus**（2026-11-11 に ModdedFiles から改名）。GitHub: https://github.com/yak9909/FilesPlus 。ローカルのフォルダ名は `E:/Projects/ModdedFiles` のまま（変えない）。
-- 設計は `docs/DESIGN.md` v0.7。Phase 0〜1 は実装済みで `dev` に統合済み。
-- 公開済みのプレリリース: v1.0.0-dev.1 〜 dev.3（dev.3 = 診断画面にアプリの ABI 表示、音声トラックのログ表記の修正）。
-  - 表示されるパッチ: Change package name（既定のアプリ名 FilesPlus）/ Custom skip duration / High-resolution playback。
-  - 隠しパッチ: ModKit 統合（Files の設定の「概要」の上に「Mod 設定」。スキップ秒数と診断画面）。
-- 実機確認の結果（OPPO A54 5G）: パッチ適用・起動・診断画面 OK。2K（1596x1996）は再生 OK。4K はカクつく。VLC はハードウェアアクセラレーション無効でも滑らか → 4K は **libVLC エンジン**で対応すると決定（DESIGN §5.5 の 0.7、Phase 5）。ただし **Phase 2 を先に**やる（ユーザー判断）。
-- ローカルビルド: `bash scripts/build.sh --no-daemon`（ワーカーが残した Gradle デーモンのせいで AccessDenied になるため。WORKERS.md 参照）。
+- 設計は `docs/DESIGN.md` v0.8。Phase 0〜1 と Phase 2 の §5.7〜§5.9 が実装済みで `dev` に統合・push 済み。**作業はユーザーの指示でここで中断している（再開の予約はなし）。**
+- 公開済みのプレリリース: v1.0.0-dev.1 〜 **dev.5**。
+  - dev.4: 先頭付近でもダブルタップで巻き戻す（`skip.rewindToStart`、既定 ON）、フォルダタブ画面の︙ →「このフォルダを削除」。
+  - dev.5: 空のフォルダもタブに表示（Mod 設定 → フォルダタブ、`tabs.showEmptyFolders` 既定 OFF、`tabs.showHidden`）。一度でもタブがあったフォルダをカテゴリごとに SharedPreferences（`tabs.knownFolders.<CATEGORY>`）に覚えて、ファイルがなくなってもタブを足す。
+  - 表示されるパッチ: Change package name / Custom skip duration / High-resolution playback / Delete folder from tabs / Show empty folder tabs。隠しパッチ: ModKit 統合、フォルダタブの共通フック（`folderTabContextPatch`）。
+- **実機確認はユーザーが最後にまとめて行う**（ユーザー指示）。dev.4・dev.5 の機能はどれも実機では未確認。PC では元 APK に全パッチをまとめて当てられることを確認済み（`build/verify/`、README あり。新しいパッチを足したら `VerifyRewind.java` の Set.of(...) に追加する）。
+- 以前の実機確認（OPPO A54 5G）: パッチ適用・起動・診断画面 OK。2K は再生 OK、4K はカクつく → 4K は **libVLC エンジン**で対応（DESIGN §5.5 の 0.7、Phase 5）。
+- ローカルビルド: `bash scripts/build.sh --no-daemon`（表示される mpp 名は最新のもの）。
 
 ## ワーカー（Codex）の状態
-- Codex の利用枠は 2026-11-11 12:44 に回復済み。
-- `tabs` ワーカー（セッション `01a1c8a6-b6d8-72a3-b155-9b8db5ce9f57`、gpt-6.1-sol / high）: §5.7・§5.8 を実装済み（`dev` に統合済み）。**待機中**。§5.9・§5.10 も同じタブ画面のフックを使うので、このセッションを続けて使う（`codex exec resume`）。使う前に worktree `E:/Projects/ModdedFiles-wt/tabs` で `git merge dev` する。
+- `tabs` ワーカー（セッション `01a1c8a6-b6d8-72a3-b155-9b8db5ce9f57`、gpt-6.1-sol / high）: §5.7・§5.8・§5.9 を実装済み（`dev` に統合済み）。**待機中**。§5.10 も同じタブ画面のフックを使うので、このセッションを続けて使う。
+  - worktree `E:/Projects/ModdedFiles-wt/tabs`（ブランチ `w/tabs`）。使う前に worktree で `git merge dev` する。
 - ワーカーは**同時に1つまで**（ユーザーの PC が重くなるため。必要なときだけ2つ）。
 
 ## 再開したらやること（順番）
-1〜3. 完了（2026-11-11）: 巻き戻しオプション（70586c4）と tabs（フォルダごと削除、3db74df）を `dev` に統合して push。元 APK に全パッチをまとめて当てられることを `build/verify/` のハーネスで確認済み。**実機確認はまだ**（ユーザーに依頼中: 先頭付近のダブルタップ巻き戻し、カテゴリのタブ画面の︙ →「このフォルダを削除」）。
-4. Phase 2 の残り（1つずつ）: 空のフォルダのタブ表示（§5.9）→ 現在のタブへ移動（§5.10）。
-5. その後: 全パッチをまとめて元の APK に当てる検証ツール（worker が `build/` に残した `VerifyModKit.java` などが参考）、Phase 5 の libVLC エンジン（APK にネイティブライブラリを足せるかの調査、32bit 版 APK で間に合うか。診断の「アプリの ABI」を見る）。
+1. **§5.10 現在のタブへ移動**: 依頼文は用意済み `worker-logs/prompts/movetotab.md`（DESIGN §5.10 の 0.8 簡略版: キューなし、名前がぶつかったら「name (1).ext」、Toast、元に戻すはなし。タブ切り替えで選択が保てないならワーカーは止まって報告する）。
+   `git -C E:/Projects/ModdedFiles-wt/tabs merge dev` のあと、`bash scripts/codex-worker.sh resume tabs 01a1c8a6-b6d8-72a3-b155-9b8db5ce9f57 worker-logs/prompts/movetotab.md`（background で実行）。
+2. 終わったらレビュー → worktree でコミット（`feat:`）→ `dev` にマージ → `bash scripts/build.sh --no-daemon` → `build/verify/` で全パッチを当てて確認 → `git pull --no-rebase origin dev`（CI のリリースコミットがあるため）→ push → プレリリース。
+3. Phase 2 が終わったら tabs セッションは不要になるので `codex delete --force <id>` して WORKERS.md から消す。
+4. その後は Phase 3 以降（下の順）。実機確認はユーザーが最後にまとめて行うので、それまでは実装を進めてよい。
 
 ## このあとの実装順（DESIGN.md §7）
-- Phase 2: フォルダタブ共通部品（§5.7）、フォルダごと削除（§5.8）、空フォルダのタブ表示（§5.9）、現在のタブへ移動（§5.10）。JobQueue は Phase 3 で導入（§5.8 の 0.7）。
+- Phase 2: 残りは現在のタブへ移動（§5.10）だけ。JobQueue は Phase 3 で導入（§5.8 の 0.7）。
 - Phase 3: プレビュー中の複数選択（§5.2）、移動キュー（§5.4）
 - Phase 4: SMB（ブラウザ・provider・サムネイルキャッシュ・接続先保存、§5.3）
 - Phase 5: 再生エンジン抽象化・**libVLC エンジン（4K）**・GIF シーク
