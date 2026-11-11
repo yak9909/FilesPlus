@@ -228,6 +228,7 @@ public final class ModSettingsActivity extends Activity {
         return tr("メーカー / モデル: ", "Manufacturer / model: ") + Build.MANUFACTURER + " / " + Build.MODEL
                 + "\nAndroid: " + Build.VERSION.RELEASE + " (SDK " + Build.VERSION.SDK_INT + ")"
                 + "\n" + tr("対応 ABI: ", "Supported ABIs: ") + String.join(", ", Build.SUPPORTED_ABIS)
+                + "\n" + tr("アプリの ABI: ", "App ABI: ") + appAbi()
                 + "\n" + tr("アプリ: ", "App: ") + getPackageName() + "\n" + tr("バージョン: ", "Version: ") + version;
     }
 
@@ -340,6 +341,18 @@ public final class ModSettingsActivity extends Activity {
 
     private String yesNo(boolean value) {
         return value ? tr("はい", "Yes") : tr("いいえ", "No");
+    }
+
+    /** ABI the app process runs as (a 32-bit APK also runs on a 64-bit device). */
+    private String appAbi() {
+        try {
+            String dir = getApplicationInfo().nativeLibraryDir;
+            return (android.os.Process.is64Bit() ? "64bit" : "32bit")
+                    + (dir == null ? "" : " (" + dir.substring(dir.lastIndexOf('/') + 1) + ")");
+        } catch (Throwable t) {
+            DiagLog.e("diagnostics", "Cannot read app ABI", t);
+            return "?";
+        }
     }
 
     private String tr(String ja, String en) {

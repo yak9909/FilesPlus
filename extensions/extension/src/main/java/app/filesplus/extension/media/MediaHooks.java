@@ -55,7 +55,7 @@ public final class MediaHooks {
         try {
             if (!format.equals(lastFormat)) {
                 lastFormat = format;
-                DiagLog.i(AREA, "Video input: " + format);
+                DiagLog.i(AREA, (format.contains("mimeType=video/") ? "Video" : "Track") + " input: " + format);
             }
         } catch (Throwable t) {
             DiagLog.e(AREA, "Logging video format failed", t);
