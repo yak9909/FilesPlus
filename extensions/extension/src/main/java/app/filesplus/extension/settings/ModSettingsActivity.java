@@ -80,6 +80,7 @@ public final class ModSettingsActivity extends Activity {
             sections.setPadding(0, 0, 0, dp(24));
             scroll.addView(sections);
             addSkipSection();
+            addFolderTabsSection();
             addDiagnosticsSection();
         } catch (Throwable t) {
             DiagLog.e("settings", "Cannot build settings screen", t);
@@ -110,6 +111,26 @@ public final class ModSettingsActivity extends Activity {
         sections.addView(toStart);
         details(tr("ダブルタップの巻き戻しで、戻す秒数より手前にいるときは先頭へ戻ります。",
                 "A double-tap rewind closer to the start than the skip duration goes to the start."));
+    }
+
+    private void addFolderTabsSection() {
+        header(tr("フォルダタブ", "Folder tabs"));
+        folderTabsSwitch(tr("空のフォルダもタブに表示", "Show empty folders as tabs"),
+                ModSettings.TABS_SHOW_EMPTY_FOLDERS, ModSettings.DEFAULT_TABS_SHOW_EMPTY_FOLDERS);
+        folderTabsSwitch(tr("隠しフォルダも表示", "Show hidden folders"),
+                ModSettings.TABS_SHOW_HIDDEN, ModSettings.DEFAULT_TABS_SHOW_HIDDEN);
+    }
+
+    private void folderTabsSwitch(String title, String key, boolean defaultValue) {
+        Switch toggle = new Switch(this);
+        toggle.setText(title);
+        toggle.setTextSize(16);
+        toggle.setTextColor(primary);
+        toggle.setPadding(dp(24), dp(16), dp(24), dp(16));
+        toggle.setMinimumHeight(dp(72));
+        toggle.setChecked(ModSettings.getBool(key, defaultValue));
+        toggle.setOnCheckedChangeListener((view, checked) -> safely(() -> ModSettings.putBool(key, checked)));
+        sections.addView(toggle);
     }
 
     private void addDiagnosticsSection() {

@@ -18,6 +18,11 @@ public final class ModSettings {
     public static final String SKIP_REWIND_TO_START = "skip.rewindToStart";
     public static final boolean DEFAULT_SKIP_REWIND_TO_START = true;
 
+    public static final String TABS_SHOW_EMPTY_FOLDERS = "tabs.showEmptyFolders";
+    public static final String TABS_SHOW_HIDDEN = "tabs.showHidden";
+    public static final boolean DEFAULT_TABS_SHOW_EMPTY_FOLDERS = false;
+    public static final boolean DEFAULT_TABS_SHOW_HIDDEN = false;
+
     private ModSettings() {}
 
     public static SharedPreferences prefs() {

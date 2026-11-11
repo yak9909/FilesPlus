@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Context;
 import android.content.ContextWrapper;
+import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.media.MediaScannerConnection;
 import android.net.Uri;
@@ -21,6 +22,8 @@ import android.view.View;
 import android.widget.Toast;
 
 import app.filesplus.extension.DiagLog;
+import app.filesplus.extension.ModKit;
+import app.filesplus.extension.ModSettings;
 
 import java.io.File;
 import java.io.IOException;
@@ -32,9 +35,11 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -49,6 +54,9 @@ public final class FolderTabContext {
     private static final Uri FILES = MediaStore.Files.getContentUri("external");
     private static final ExecutorService WORKER = Executors.newSingleThreadExecutor();
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
+    private static final String KNOWN_PREFIX = "tabs.knownFolders.";
+    private static final Object KNOWN_LOCK = new Object();
+    private static final Map<String, String> TAB_QUERIES = new LinkedHashMap<>();
     private static final Set<String> STANDARD = new HashSet<>(Arrays.asList(
             "dcim", "download", "movies", "pictures", "music", "documents", "alarms",
             "notifications", "podcasts", "ringtones", "recordings", "audiobooks"));
@@ -85,6 +93,130 @@ public final class FolderTabContext {
 
     public static void hookError(Throwable t) {
         DiagLog.e(AREA, "Folder-tab hook failed", t);
+    }
+
+    /** Native MediaStore query constructors supply their complete category predicates, without I/O. */
+    public static void rememberQuery(String filters, int type, String selection) {
+        try {
+            String category;
+            switch (type) {
+                case 1: category = "CATEGORY_IMAGE"; break;
+                case 2: category = "CATEGORY_AUDIO"; break;
+                case 3: category = "CATEGORY_VIDEO"; break;
+                case -4: category = "CATEGORY_DOCUMENT"; break;
+                case -5: category = "CATEGORY_DOCUMENT_ONLY"; break;
+                case -6: category = "CATEGORY_OTHER"; break;
+                case -2: category = "CATEGORY_RECENTS"; break;
+                case -100: category = "CATEGORY_DOWNLOAD"; break;
+                default: return;
+            }
+            synchronized (TAB_QUERIES) {
+                TAB_QUERIES.put(category + ":" + filters, selection);
+                while (TAB_QUERIES.size() > 1024) TAB_QUERIES.remove(TAB_QUERIES.keySet().iterator().next());
+            }
+        } catch (Throwable t) { hookError(t); }
+    }
+
+    /** Called at the end of the native background tab builder, even while the feature is off. */
+    public static String[] emptyFolders(String category, Bundle[] tabs) {
+        try {
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+                throw new IllegalStateException("Known-folder resolution must run off the UI thread");
+            }
+            Context context = ModKit.context();
+            SharedPreferences prefs = ModSettings.prefs();
+            if (context == null || prefs == null || category == null) return new String[0];
+            long started = System.nanoTime();
+            synchronized (KNOWN_LOCK) {
+                String key = KNOWN_PREFIX + category;
+                Set<String> saved = prefs.getStringSet(key, Collections.emptySet());
+                Set<String> known = new HashSet<>(saved);
+                known.removeIf(path -> !new File(path).isDirectory());
+                List<File> volumes = roots(context);
+                Set<String> names = new HashSet<>();
+                Set<String> present = new HashSet<>();
+                Set<String> selections = new HashSet<>();
+                for (Bundle tab : tabs) {
+                    if (tab == null || tab.getBoolean("invalid")) continue;
+                    String name = tab.getString("name");
+                    if (name != null) {
+                        names.add(name.toLowerCase(Locale.ROOT));
+                        synchronized (TAB_QUERIES) {
+                            String selection = TAB_QUERIES.get(category + ":" + tab.getString("filters"));
+                            if (selection != null) selections.add("(" + selection + ")");
+                        }
+                    }
+                    else {
+                        String folder = resolve(context, tab);
+                        if (folder != null) present.add(folder);
+                    }
+                }
+                if (!selections.isEmpty()) {
+                    // Use the host's exact predicates, including MIME, hidden, trash and Downloads rules.
+                    // A single distinct-directory query resolves all native tabs in this category.
+                    Map<String, File> byVolume = new HashMap<>();
+                    StorageManager manager = context.getSystemService(StorageManager.class);
+                    for (StorageVolume volume : manager.getStorageVolumes()) {
+                        if (volume.getDirectory() != null && volume.getMediaStoreVolumeName() != null)
+                            byVolume.put(volume.getMediaStoreVolumeName(), volume.getDirectory());
+                    }
+                    Uri distinct = FILES.buildUpon().appendQueryParameter("distinct", "true").build();
+                    try (Cursor cursor = context.getContentResolver().query(distinct,
+                            new String[]{"relative_path", "volume_name"},
+                            String.join(" OR ", selections), null, null)) {
+                        if (cursor != null) while (cursor.moveToNext()) {
+                            String relative = cursor.getString(0);
+                            File volume = byVolume.get(cursor.getString(1));
+                            if (relative == null || volume == null) continue;
+                            String folder = folderPath(new File(volume, relative), volumes);
+                            if (folder != null) present.add(folder);
+                        }
+                    }
+                }
+                known.addAll(present);
+                if (!known.equals(saved)) prefs.edit().putStringSet(key, known).apply();
+                if (!ModSettings.getBool(ModSettings.TABS_SHOW_EMPTY_FOLDERS,
+                        ModSettings.DEFAULT_TABS_SHOW_EMPTY_FOLDERS)) return new String[0];
+                boolean hidden = ModSettings.getBool(ModSettings.TABS_SHOW_HIDDEN, ModSettings.DEFAULT_TABS_SHOW_HIDDEN);
+                List<String> added = new ArrayList<>();
+                for (String path : known) {
+                    File folder = new File(path);
+                    if (present.contains(path) || names.contains(folder.getName().toLowerCase(Locale.ROOT))) continue;
+                    if ((!hidden && folder.getName().startsWith(".")) || protectedPath(folder, volumes)) continue;
+                    // Canonical equality also excludes symlinks and paths that escape mounted storage.
+                    if (path.equals(folderPath(folder, volumes))) added.add(path);
+                }
+                added.sort((left, right) -> {
+                    int order = new File(left).getName().toLowerCase(Locale.getDefault())
+                            .compareTo(new File(right).getName().toLowerCase(Locale.getDefault()));
+                    return order == 0 ? left.compareTo(right) : order;
+                });
+                long millis = (System.nanoTime() - started) / 1_000_000;
+                if (millis > 50) DiagLog.i(AREA, "Known folders for " + category + " took " + millis + " ms");
+                return added.toArray(new String[0]);
+            }
+        } catch (Throwable t) {
+            DiagLog.e(AREA, "Cannot extend folder tabs for " + category, t);
+            return new String[0];
+        }
+    }
+
+    private static void forgetDeletedFolders(Context context, File removed) {
+        try {
+            if (removed.isDirectory()) return;
+            synchronized (KNOWN_LOCK) {
+                SharedPreferences prefs = context.getSharedPreferences(ModSettings.PREFS, Context.MODE_PRIVATE);
+                SharedPreferences.Editor edit = prefs.edit();
+                for (Map.Entry<String, ?> entry : prefs.getAll().entrySet()) {
+                    if (!entry.getKey().startsWith(KNOWN_PREFIX)) continue;
+                    Set<String> old = prefs.getStringSet(entry.getKey(), Collections.emptySet());
+                    Set<String> next = new HashSet<>(old);
+                    next.removeIf(path -> path.equals(removed.getPath()) || path.startsWith(removed.getPath() + File.separator));
+                    if (!next.equals(old)) edit.putStringSet(entry.getKey(), next);
+                }
+                edit.apply();
+            }
+        } catch (Throwable t) { DiagLog.e(AREA, "Cannot forget deleted known folder " + removed, t); }
     }
 
     /** Called only by the bridge, for AND-connected filters in the app's collection identifier. */
@@ -286,6 +418,7 @@ public final class FolderTabContext {
                 DiagLog.e(AREA, "Folder deletion failed: " + folder, t);
             } finally {
                 syncDeleted(context, deleted, result);
+                forgetDeletedFolders(context, folder);
             }
             boolean success = !Files.exists(folder.toPath()) && result[1] == 0 && result[2] == 0;
             String report = "Folder " + folder + ": deleted=" + result[0] + ", failed=" + result[1]
@@ -386,7 +519,7 @@ public final class FolderTabContext {
             // These are root-relative collections. Require exactly one existing volume candidate.
             String match = null;
             for (File volume : roots(context)) {
-                File candidate = prefix.startsWith(volume.getPath() + "/") ? new File(prefix)
+                File candidate = prefix.startsWith(volume.getPath() + File.separator) ? new File(prefix)
                         : new File(volume, prefix.replaceFirst("^/+", ""));
                 String found = folderPath(context, candidate);
                 if (found == null) continue;
@@ -438,10 +571,14 @@ public final class FolderTabContext {
     }
 
     private static String folderPath(Context context, File folder) throws IOException {
+        return folderPath(folder, roots(context));
+    }
+
+    private static String folderPath(File folder, List<File> volumes) throws IOException {
         if (Files.isSymbolicLink(folder.toPath()) || !folder.isDirectory()) return null;
         File canonical = folder.getCanonicalFile();
-        for (File volume : roots(context)) {
-            if (canonical.equals(volume) || canonical.getPath().startsWith(volume.getPath() + "/"))
+        for (File volume : volumes) {
+            if (canonical.equals(volume) || canonical.getPath().startsWith(volume.getPath() + File.separator))
                 return canonical.getPath();
         }
         return null;
@@ -463,8 +600,8 @@ public final class FolderTabContext {
             String base = volume.getPath();
             String path = folder.getPath();
             if (path.equals(base)) return true;
-            if (!path.startsWith(base + "/")) continue;
-            String relative = path.substring(base.length() + 1).toLowerCase(Locale.ROOT);
+            if (!path.startsWith(base + File.separator)) continue;
+            String relative = path.substring(base.length() + 1).replace(File.separatorChar, '/').toLowerCase(Locale.ROOT);
             if (relative.equals("android") || relative.startsWith("android/")) return true;
             return !relative.contains("/") && STANDARD.contains(relative);
         }

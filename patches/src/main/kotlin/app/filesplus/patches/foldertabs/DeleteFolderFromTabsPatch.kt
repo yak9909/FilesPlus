@@ -32,11 +32,8 @@ private fun Method.literal(value: Long) = code().any { (it as? WideLiteralInstru
 private fun Method.fields() = code().mapNotNull { it.ref() as? FieldReference }
 private fun Method.calls() = code().mapNotNull { it.ref() as? MethodReference }
 
-val deleteFolderFromTabsPatch = bytecodePatch(
-    name = "Delete folder from tabs",
-    description = "Permanently delete the current folder from category tabs, with confirmation and protected folders.",
-    default = true,
-) {
+/** Shared context hooks are installed once, even when only the empty-tabs patch is selected. */
+internal val folderTabContextPatch = bytecodePatch {
     compatibleWith(Constants.COMPATIBILITY_FILES)
     dependsOn(modKitIntegrationPatch)
 
@@ -273,6 +270,18 @@ val deleteFolderFromTabsPatch = bytecodePatch(
             :done
         """.trimIndent())
 
+    }
+}
+
+val deleteFolderFromTabsPatch = bytecodePatch(
+    name = "Delete folder from tabs",
+    description = "Permanently delete the current folder from category tabs, with confirmation and protected folders.",
+    default = true,
+) {
+    compatibleWith(Constants.COMPATIBILITY_FILES)
+    dependsOn(modKitIntegrationPatch, folderTabContextPatch)
+
+    execute {
         val menuOwner = mutableClassDefBy(classDefBy { cls -> cls.methods.any { method ->
             method.parameterTypes == listOf("Landroid/view/Menu;") && method.literal(0x7f0f001b)
         } })
