@@ -24,24 +24,32 @@ Talk to the user in Japanese.
 - `analysis/tools/` — jadx, apktool.jar.
 - Obfuscated names (e.g. `kwd`, `jpx`, `kxo`, `imh`) are valid **only for versionCode 2081362**. In patches, locate code with Morphe fingerprints (strings, resource IDs, unobfuscated classes), never by obfuscated names.
 
-## Working with Codex CLI workers (token-saving workflow)
+## Workers: Claude subagents first (since 2026-11-11, user instruction)
 Roles:
-- **Claude (Opus 5.5)**: design, task breakdown, review, and integration. Design decisions go into `docs/DESIGN.md`.
-- **Codex workers** implement. Choose the model per task:
-  - `gpt-6-luna` — simple/mechanical work (renames, boilerplate, resource XML, repetitive edits).
-  - `gpt-6.1-sol` — everything else (patch logic, fingerprints, smali, Android code).
-  - Reasoning effort: Claude decides per task (`-c model_reasoning_effort=low|medium|high|xhigh`).
+- **Claude (Opus 5.5, main session)**: design, task breakdown, review, and integration. Design decisions go into `docs/DESIGN.md`.
+- **Workers implement. Prefer Claude subagents** (Agent tool, `model` override):
+  - `haiku` (Haiku 5.5) — simple/mechanical work (renames, boilerplate, resource XML, repetitive edits).
+  - `sonnet` (Sonnet 5.5) — everything else (patch logic, fingerprints, smali, Android code).
+  - Effort: Claude (main) decides per task (`effort: low|medium|high|xhigh`).
+  - Brief them with `docs/WORKER_BRIEF.md` + the task prompt (English). They work in a worktree under `E:/Projects/ModdedFiles-wt/<name>` (branch `w/<name>`), do not commit, and reply with changed files + a short summary.
+  - Continue a running/finished subagent with SendMessage when its context is still useful; otherwise start a new one.
+- **Codex CLI workers are a fallback only** (e.g. when Claude usage is tight). Procedure below.
 - If a task is light enough that doing it directly costs fewer tokens than briefing a worker, Claude does it itself.
 
-Rules:
+Usage limit (usage-guard, account-wide):
+- Watch **only the 5-hour window**; weekly window is not watched. Threshold **80%** (`usage_guard.py set --five-hour 80 --weekly off`).
+- When the guard notice (「【利用枠の見張り】…」) arrives: **graceful stop, not a hard kill** — start nothing new, let the running worker/build finish, reach a clean checkpoint (no half-applied edits; commit/merge only if reviewed), update `docs/HANDOFF.md`, and tell the user the progress and the next step. Continue only if the user says so.
+
+Rules (all workers):
 - **Communicate with workers in English** (prompts and requested replies). Ask for short replies: changed files + a summary, no full diffs.
-- **Use normal (persistent) sessions, not ephemeral ones** — do not pass `--ephemeral`. Keep context by resuming:
-  - start: `codex exec -m <model> -c model_reasoning_effort=<e> -s workspace-write -C E:/Projects/ModdedFiles "<prompt>"` (note the `session id` it prints)
-  - continue: `codex exec resume <SESSION_ID> "<prompt>"`
-- **When starting work that does not need the previous worker context, start a new session; if the old session is no longer needed, delete it** with `codex delete <SESSION_ID>`.
-- Track active worker sessions in `docs/WORKERS.md` (id, model, purpose, status) so they survive `/clear`.
+- Track active workers (subagent name/ID or Codex session id, model, purpose, status) in `docs/WORKERS.md` so they survive `/clear`.
 - Claude reviews every worker result (build + diff review) before committing.
 - **Run at most 1 worker at a time** (the user's PC gets slow). 2 in parallel only when really needed. Never 3+.
+
+Codex fallback:
+- Models: `gpt-6-luna` (simple) / `gpt-6.1-sol` (other); effort via `-c model_reasoning_effort=...`.
+- Use persistent sessions (no `--ephemeral`). Launcher: `scripts/codex-worker.sh start|resume ...`.
+- Delete sessions no longer needed with `codex delete --force <SESSION_ID>`.
 
 ## Notes that must survive /clear
 - Memory files may be lost when the session is cleared, so anything important lives here or in `docs/`.
