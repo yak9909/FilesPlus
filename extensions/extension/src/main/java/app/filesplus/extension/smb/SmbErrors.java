@@ -39,6 +39,40 @@ public final class SmbErrors {
         }
     }
 
+    /**
+     * Raised when the server's list of shares cannot be read (access denied, no srvsvc service). The user can
+     * still connect by typing the share name.
+     */
+    public static final class ShareListException extends IOException {
+        public ShareListException(String message) {
+            super(message);
+        }
+
+        public ShareListException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
+    /** True when the share list is unavailable but the server itself answered. */
+    public static boolean isShareListUnavailable(Throwable t) {
+        return find(t, ShareListException.class) != null;
+    }
+
+    /**
+     * Wraps the failures that mean "this server does not give out its share list" (refused IPC$, missing srvsvc
+     * pipe) so callers can tell the user to type the share name. Returns null for any other failure.
+     */
+    public static ShareListException asShareListFailure(Throwable t) {
+        ShareListException existing = find(t, ShareListException.class);
+        if (existing != null) return existing;
+        if (hasStatus(t, "STATUS_ACCESS_DENIED") || hasStatus(t, "STATUS_OBJECT_NAME_NOT_FOUND")
+                || hasStatus(t, "STATUS_BAD_NETWORK_NAME") || hasStatus(t, "STATUS_NOT_SUPPORTED")
+                || hasStatus(t, "STATUS_PIPE_NOT_AVAILABLE") || hasStatus(t, "STATUS_OBJECT_PATH_NOT_FOUND")) {
+            return new ShareListException("The server does not list its shares (" + describe(t) + ")", t);
+        }
+        return null;
+    }
+
     /** True when the saved password is missing or unreadable (not a server answer). */
     public static boolean isPasswordMissing(Throwable t) {
         return find(t, PasswordMissingException.class) != null;

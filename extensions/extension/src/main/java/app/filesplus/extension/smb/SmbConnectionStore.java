@@ -198,7 +198,8 @@ public final class SmbConnectionStore {
         String id = o.optString("id", "");
         String host = o.optString("host", "");
         String share = o.optString("share", "");
-        if (id.isEmpty() || host.isEmpty() || share.isEmpty()) return null;
+        // The share is optional: without one the connection lists the server's shares.
+        if (id.isEmpty() || host.isEmpty()) return null;
         return new SmbConnection(id, o.optString("name", ""), host, o.optInt("port", SmbClientFactory.DEFAULT_PORT), share,
                 o.optString("start", ""), o.optString("user", ""), o.optString("domain", ""),
                 o.optString("open", SmbConnection.OPEN_LAST), o.optString("last", ""));

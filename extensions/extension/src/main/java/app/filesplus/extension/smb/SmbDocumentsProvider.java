@@ -77,7 +77,7 @@ public final class SmbDocumentsProvider extends DocumentsProvider {
                         .add(Root.COLUMN_FLAGS, Root.FLAG_SUPPORTS_IS_CHILD)
                         .add(Root.COLUMN_ICON, icon)
                         .add(Root.COLUMN_TITLE, c.label())
-                        .add(Root.COLUMN_SUMMARY, c.host + "/" + c.share)
+                        .add(Root.COLUMN_SUMMARY, c.hostAndShare())
                         .add(Root.COLUMN_DOCUMENT_ID, SmbDocId.root(c.id));
             }
         } catch (Throwable t) {

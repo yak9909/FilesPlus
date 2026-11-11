@@ -44,12 +44,25 @@ public final class SmbConnection {
         return new SmbConnection(id, displayName, host, port, share, startPath, user, domain, openWhere, path);
     }
 
-    /** Display name, or "host/share" when none was given. */
-    public String label() {
-        return displayName.isEmpty() ? host + "/" + share : displayName;
+    /** True when a share name is saved. Without one the root of the connection lists the server's shares. */
+    public boolean hasShare() {
+        return !share.isEmpty();
     }
 
-    /** Folder to open first: the last folder when requested and known, else the start folder. */
+    /** Display name, or "host" / "host/share" when none was given. */
+    public String label() {
+        return displayName.isEmpty() ? hostAndShare() : displayName;
+    }
+
+    /** "host" or "host/share". */
+    public String hostAndShare() {
+        return hasShare() ? host + "/" + share : host;
+    }
+
+    /**
+     * Folder to open first: the last folder when requested and known, else the start folder. Paths are
+     * share-relative when a share is saved and "&lt;share&gt;/&lt;folder&gt;" (server-relative) when not.
+     */
     public String initialPath() {
         return OPEN_LAST.equals(openWhere) && !lastPath.isEmpty() ? lastPath : startPath;
     }

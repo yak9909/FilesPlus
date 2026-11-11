@@ -13,6 +13,7 @@ import com.hierynomus.smbj.connection.Connection;
 import com.hierynomus.smbj.session.Session;
 import com.hierynomus.smbj.share.DiskShare;
 import com.hierynomus.smbj.share.File;
+import com.hierynomus.smbj.share.PipeShare;
 import com.hierynomus.smbj.share.Share;
 
 import java.util.ArrayList;
@@ -33,7 +34,6 @@ public final class SmbTester {
         long started = System.currentTimeMillis();
         host = trim(host);
         if (host.isEmpty()) return "Error: host is empty";
-        if (trim(share).isEmpty()) return "Error: share name is empty";
         SMBClient client = null;
         Connection connection = null;
         Session session = null;
@@ -43,6 +43,10 @@ public final class SmbTester {
             connection = client.connect(host, port > 0 ? port : SmbClientFactory.DEFAULT_PORT);
             session = connection.authenticate(context(user, password, domain));
             String dialect = String.valueOf(connection.getNegotiatedProtocol().getDialect());
+            if (trim(share).isEmpty()) {
+                // No share given: report what the server lists instead.
+                return shareListReport(session, host, dialect, started);
+            }
             connected = session.connectShare(trim(share));
             if (!(connected instanceof DiskShare)) {
                 return "Error: '" + trim(share) + "' is not a disk share (" + connected.getClass().getSimpleName() + ")";
@@ -94,6 +98,35 @@ public final class SmbTester {
             closeQuietly(connection);
             closeQuietly(client);
         }
+    }
+
+    private static String shareListReport(Session session, String host, String dialect, long started)
+            throws java.io.IOException {
+        List<SmbShareEnum.ShareInfo> infos;
+        Share ipc = null;
+        try {
+            ipc = session.connectShare(SmbSessionPool.IPC_SHARE);
+            if (!(ipc instanceof PipeShare)) return "Error: IPC$ is not a pipe share (" + ipc.getClass().getSimpleName() + ")";
+            infos = SmbShareEnum.list((PipeShare) ipc, host);
+        } catch (java.io.IOException | RuntimeException e) {
+            SmbErrors.ShareListException refused = SmbErrors.asShareListFailure(e);
+            if (refused == null) throw e;
+            DiagLog.i("smb", "Share list refused: " + SmbErrors.describe(e));
+            return "Error: the server does not list its shares; enter the share name (" + SmbErrors.describe(e) + ")";
+        } finally {
+            closeQuietly(ipc);
+        }
+        List<String> names = new ArrayList<>();
+        for (SmbShareEnum.ShareInfo info : infos) {
+            if (info.isBrowsable()) names.add(info.name);
+        }
+        StringBuilder report = new StringBuilder("Dialect: ").append(dialect).append("\nShares: ").append(names.size());
+        for (int i = 0; i < names.size() && i < MAX_NAMES * 2; i++) report.append("\n  ").append(names.get(i));
+        if (names.size() > MAX_NAMES * 2) report.append("\n  ...");
+        long elapsed = System.currentTimeMillis() - started;
+        report.append("\nElapsed: ").append(elapsed).append(" ms");
+        DiagLog.i("smb", "Share list OK, " + names.size() + " shares, " + elapsed + " ms");
+        return report.toString();
     }
 
     private static void closeQuietly(AutoCloseable closeable) {
