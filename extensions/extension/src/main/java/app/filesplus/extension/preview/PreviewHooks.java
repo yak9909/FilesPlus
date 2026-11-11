@@ -15,8 +15,6 @@ import android.view.WindowInsets;
 import android.widget.Toast;
 
 import java.lang.ref.WeakReference;
-import java.util.ArrayList;
-import java.util.List;
 
 import app.filesplus.extension.DiagLog;
 import app.filesplus.extension.ModKit;
@@ -71,19 +69,6 @@ public final class PreviewHooks {
         try {
             updateOverlay(galleryRoot, id, hasId);
         } catch (Throwable t) { hookError(t); }
-    }
-
-    /**
-     * Hands the collected entries to the caller (the list screen's selection model) and forgets them,
-     * so nothing stale is left for the next preview visit. Empty when nothing was selected.
-     */
-    public static List<Object> takePendingForList() {
-        try {
-            return SelectionStore.drain();
-        } catch (Throwable t) {
-            hookError(t);
-            return new ArrayList<>();
-        }
     }
 
     /**

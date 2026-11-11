@@ -48,7 +48,7 @@ private fun need(condition: Boolean, detail: () -> String) {
 
 val previewMultiSelectPatch = bytecodePatch(
     name = "Multi-select in preview",
-    description = "Add Select / Deselect items to the preview screen's menu to collect files while previewing.",
+    description = "Add Select / Deselect items to the preview screen's menu to collect files while previewing, and select them in the list when you go back.",
     default = true,
 ) {
     compatibleWith(Constants.COMPATIBILITY_FILES)
@@ -257,7 +257,7 @@ val previewMultiSelectPatch = bytecodePatch(
         val returns = constructor.code().withIndex().filter { it.value.opcode == Opcode.RETURN_VOID }
         need(returns.isNotEmpty()) { "selection model constructor without return" }
         for ((index) in returns.reversed()) {
-            (constructor as MutableMethod).addInstructions(index, "invoke-static {p0}, $LIST_HANDOFF->registerModel(Ljava/lang/Object;)V")
+            (constructor as MutableMethod).addInstructions(index, "invoke-static/range {p0 .. p0}, $LIST_HANDOFF->registerModel(Ljava/lang/Object;)V")
         }
     }
 }

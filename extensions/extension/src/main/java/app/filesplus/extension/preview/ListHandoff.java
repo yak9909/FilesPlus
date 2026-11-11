@@ -3,7 +3,11 @@ package app.filesplus.extension.preview;
 import android.app.Activity;
 import android.app.Application;
 import android.content.Context;
+import android.database.Cursor;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.provider.MediaStore;
 
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
@@ -39,7 +43,9 @@ public final class ListHandoff implements Application.ActivityLifecycleCallbacks
     private static final List<Registered> MODELS = new ArrayList<>();
     private static boolean installed;
     private static WeakReference<Activity> current;
+    /** The preview instance we last saw (weak: only for the finishing check) and its class (kept). */
     private static WeakReference<Activity> preview;
+    private static Class<?> previewClass;
 
     private ListHandoff() {}
 
@@ -56,6 +62,15 @@ public final class ListHandoff implements Application.ActivityLifecycleCallbacks
                 // Unknown owner (created before the callbacks were registered) is adopted on the next resume.
                 MODELS.add(new Registered(model, current == null ? null : current.get()));
             }
+            // A list recreated while the preview was open builds its model after it resumed: retry then.
+            if (SelectionStore.count() > 0 && previewClosing()) {
+                new Handler(Looper.getMainLooper()).post(() -> {
+                    try {
+                        Activity activity = current == null ? null : current.get();
+                        if (activity != null && SelectionStore.count() > 0 && !isPreview(activity)) handOver(activity);
+                    } catch (Throwable t) { PreviewHooks.hookError(t); }
+                });
+            }
         } catch (Throwable t) {
             PreviewHooks.hookError(t);
         }
@@ -63,10 +78,18 @@ public final class ListHandoff implements Application.ActivityLifecycleCallbacks
 
     /** Remembers the Activity that hosts the gallery fragment; found from a view, never by name. */
     static void notePreviewActivity(Activity activity) {
-        if (activity != null) preview = new WeakReference<>(activity);
+        if (activity == null) return;
+        previewClass = activity.getClass();
+        preview = new WeakReference<>(activity);
     }
 
-    private static void install() {
+    /** True when the preview instance we know of is finishing or gone (back / up pressed). */
+    private static boolean previewClosing() {
+        Activity known = preview == null ? null : preview.get();
+        return known == null || known.isFinishing() || known.isDestroyed();
+    }
+
+    private static synchronized void install() {
         if (installed) return;
         Context context = ModKit.context();
         if (!(context instanceof Application)) return;
@@ -75,9 +98,9 @@ public final class ListHandoff implements Application.ActivityLifecycleCallbacks
         DiagLog.i(AREA, "List hand-off installed");
     }
 
+    /** By class, which is kept even when the instance is gone (a recreated preview resumes before its menu). */
     private static boolean isPreview(Activity activity) {
-        Activity known = preview == null ? null : preview.get();
-        return known != null && known.getClass() == activity.getClass();
+        return previewClass != null && previewClass == activity.getClass();
     }
 
     @Override
@@ -101,11 +124,27 @@ public final class ListHandoff implements Application.ActivityLifecycleCallbacks
     public void onActivityDestroyed(Activity activity) {
         try {
             // Anything not handed over by the time the preview closes (e.g. it was opened from outside) is dropped.
-            if (activity.isFinishing() && isPreview(activity) && SelectionStore.count() > 0) {
+            // Only the instance we last saw counts: an older preview going away must not clear a newer one's picks.
+            Activity known = preview == null ? null : preview.get();
+            if (activity == known && activity.isFinishing() && SelectionStore.count() > 0) {
                 DiagLog.i(AREA, "Preview closed, dropping " + SelectionStore.count() + " unclaimed selected files");
                 SelectionStore.clear();
             }
         } catch (Throwable t) { PreviewHooks.hookError(t); }
+    }
+
+    /** Whether the MediaStore row still exists (trashed rows are hidden from plain queries). Unsure counts as yes. */
+    private static boolean exists(long id) {
+        try {
+            Context context = ModKit.context();
+            if (context == null) return true;
+            try (Cursor cursor = context.getContentResolver().query(
+                    MediaStore.Files.getContentUri("external", id), new String[] {MediaStore.MediaColumns._ID}, null, null, null)) {
+                return cursor == null || cursor.getCount() > 0;
+            }
+        } catch (Throwable t) {
+            return true;
+        }
     }
 
     private static void adoptUnowned(Activity activity) {
@@ -119,8 +158,7 @@ public final class ListHandoff implements Application.ActivityLifecycleCallbacks
     private static void handOver(Activity activity) {
         // We came back from the preview only when it is closing (back / up pressed: finish() runs before the
         // previous Activity resumes). An Activity opened on top of a live preview (file info ...) is not a target.
-        Activity previewActivity = preview == null ? null : preview.get();
-        if (previewActivity != null && !previewActivity.isFinishing() && !previewActivity.isDestroyed()) return;
+        if (!previewClosing()) return;
 
         List<SelectionTarget> targets = new ArrayList<>();
         synchronized (MODELS) {
@@ -137,7 +175,8 @@ public final class ListHandoff implements Application.ActivityLifecycleCallbacks
         }
         if (targets.isEmpty()) return;
 
-        List<Object> entries = SelectionStore.drain();
+        // Files deleted or trashed while previewing no longer exist in MediaStore: leave them out.
+        List<Object> entries = SelectionStore.drain(ListHandoff::exists);
         if (entries.isEmpty()) return;
         int delivered = 0;
         for (SelectionTarget target : targets) {

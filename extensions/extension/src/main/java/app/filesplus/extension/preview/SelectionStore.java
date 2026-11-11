@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.LongPredicate;
 
 /**
  * Files selected in the preview screen. Entries are opaque app objects (the app's own file proto)
@@ -38,9 +39,12 @@ public final class SelectionStore {
         return new ArrayList<>(SELECTED.values());
     }
 
-    /** Returns the selected entries (a copy) and clears the store in one step. */
-    public static synchronized List<Object> drain() {
-        List<Object> entries = new ArrayList<>(SELECTED.values());
+    /** Returns the entries whose id passes {@code keep} (a copy) and clears the store in one step. */
+    public static synchronized List<Object> drain(LongPredicate keep) {
+        List<Object> entries = new ArrayList<>();
+        for (Map.Entry<Long, Object> entry : SELECTED.entrySet()) {
+            if (keep.test(entry.getKey())) entries.add(entry.getValue());
+        }
         SELECTED.clear();
         return entries;
     }
