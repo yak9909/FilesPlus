@@ -3,7 +3,6 @@ package app.filesplus.extension.move;
 import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
-import android.os.Process;
 import android.webkit.MimeTypeMap;
 import android.widget.Toast;
 
@@ -21,8 +20,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 /**
  * Background move queue that outlives the preview Activity. Files are moved one job per id on a single
@@ -34,7 +31,6 @@ public final class MoveQueue {
     private static final Object LOCK = new Object();
     private static final long NO_PAGE = Long.MIN_VALUE;
 
-    private static ExecutorService executor;
     private static long currentId = NO_PAGE;
     private static final List<Job> deferred = new ArrayList<>();
 
@@ -54,6 +50,7 @@ public final class MoveQueue {
         int moved;
         int skipped;
         int failed;
+        int crossVolume;
         boolean destinationLogged;
 
         Batch(Context app, File destination, Done done, int pending) {
@@ -170,31 +167,16 @@ public final class MoveQueue {
 
     private static void submit(Job job) {
         try {
-            executor().execute(() -> run(job));
+            // The shared file-operation thread: queue jobs and "move to current tab" never run concurrently.
+            TabMove.fileExecutor().execute(() -> run(job));
         } catch (Throwable t) {
             DiagLog.e(AREA, "submit failed", t);
-            finish(job, 0, 0, 1);
-        }
-    }
-
-    private static ExecutorService executor() {
-        synchronized (LOCK) {
-            if (executor == null) {
-                executor = Executors.newSingleThreadExecutor(r -> new Thread(() -> {
-                    try {
-                        Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND);
-                    } catch (Throwable ignored) {
-                        // Priority is best effort.
-                    }
-                    r.run();
-                }, "filesplus-move-queue"));
-            }
-            return executor;
+            finish(job, 0, 0, 1, 0);
         }
     }
 
     private static void run(Job job) {
-        int moved = 0, skipped = 0, failed = 0;
+        int moved = 0, skipped = 0, failed = 0, crossVolume = 0;
         try {
             File destination = job.batch.destination;
             if (!destination.isDirectory() || !destination.canWrite()) {
@@ -215,33 +197,38 @@ public final class MoveQueue {
                     moved = result.moved;
                     skipped = result.skipped;
                     failed = result.failed;
+                    crossVolume = result.crossVolume;
                 }
             }
         } catch (Throwable t) {
             DiagLog.e(AREA, "Job failed for id " + job.id, t);
             failed = 1;
         }
-        finish(job, moved, skipped, failed);
+        finish(job, moved, skipped, failed, crossVolume);
     }
 
-    private static void finish(Job job, int moved, int skipped, int failed) {
+    private static void finish(Job job, int moved, int skipped, int failed, int crossVolume) {
         try {
             Batch batch = job.batch;
             boolean done;
-            int totalMoved, totalSkipped, totalFailed;
+            int totalMoved, totalSkipped, totalFailed, totalCross;
             synchronized (batch) {
                 batch.moved += moved;
                 batch.skipped += skipped;
                 batch.failed += failed;
+                batch.crossVolume += crossVolume;
                 batch.pending--;
                 done = batch.pending == 0;
                 totalMoved = batch.moved;
                 totalSkipped = batch.skipped;
                 totalFailed = batch.failed;
+                totalCross = batch.crossVolume;
             }
             if (!done) return;
             if (totalMoved > 0) DestinationHistory.record(batch.destination.getPath());
-            toast(batch.app, message(batch.destination, totalMoved, totalSkipped, totalFailed));
+            String text = message(batch.destination, totalMoved, totalSkipped, totalFailed);
+            if (totalCross > 0) text += "\n" + TabMove.crossVolumeNote(batch.app);
+            toast(batch.app, text);
             if (batch.done != null) {
                 // MediaStore was synced inside TabMove.move, so a reload from here no longer lists the moved files.
                 int notMoved = totalSkipped + totalFailed;
