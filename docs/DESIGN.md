@@ -247,6 +247,16 @@ object SelectionStore {                         // プレビュー（§5.2）と
 | provider の操作 | SAF 用に `FLAG_SUPPORTS_DELETE / RENAME / WRITE / THUMBNAIL / DIR_SUPPORTS_CREATE` を立てる |
 | サーバー探索 | 手入力が基本。任意で mDNS（`_smb._tcp`）で候補を出す |
 
+**調査結果（2026-11-12、versionCode 2081362。難読化名は目印だけ）と決定（0.9）**
+- 拡張の `AndroidManifest.xml` は空（`<manifest/>`）で、マージされない。`modKitManifestPatch`（`ModKitIntegrationPatch.kt`、resourcePatch）が DOM で `<application>` に要素を足している。**provider・activity・service も同じ方法で足す**（クラス名は完全修飾）。
+- provider の条件（元アプリの一覧 `hyn` case 5）: `exported`、`grantUriPermissions`、`android:permission="android.permission.MANAGE_DOCUMENTS"`、intent-filter の action `android.content.action.DOCUMENTS_PROVIDER`。一覧は `queryIntentContentProviders` で作られる（`QUERY_ALL_PACKAGES` あり）。
+- **authority**: manifest パッチでは `<manifest の package 属性> + ".smb.documents"` と書き、拡張のコードでは実行時に `context.getPackageName() + ".smb.documents"` で作る（完全な authority を文字列定数にしない。パッケージ名変更パッチとの順序に依存しないため）。provider の `onCreate` は `Application.onCreate` より前に動くので、自分で `ModKit.init(getContext())` を呼ぶ。
+- ライブラリ: **smbj 0.15.0**（Apache-2.0）。依存は bcprov-jdk18on、slf4j-api、mbassador、asn-one。拡張は**単一の dex**（`classes2.dex` は上書きされる）なので 65,536 メソッド以内にする。今は約 13,780 メソッド、smbj 一式で 45〜50K の見込み。溢れたら R8（`-dontobfuscate`、`app.filesplus.extension.**` を keep、`org.bouncycastle.jcajce.provider.**` を keep）。Android の組み込み「BC」と衝突するので、同梱の `BouncyCastleProvider` のインスタンスを `JceSecurityProvider` として `SmbConfig` に渡す（名前では登録しない）。認証は NTLM のみ（Kerberos/GSS は使わない）。ライセンスは `NOTICE` に追記する。代替は jcifs-ng（LGPL）、自作は採らない。
+- **共有一覧（srvsvc）は最初の版では作らない**: 接続先に共有名を必須にする（dcerpc ライブラリは guava などを引いてメソッド数が危ない）。あとで足す。
+- 「その他のストレージ」のタップ（`imh.a()`、文字列 "Unable to create intent from package: %s" / "Unable to start document provider activity"）: `getLaunchIntentForPackage(String)` の結果を `SmbHooks.launchIntent(Intent, String)` に通し、パッケージ名が自分のときは `SmbBrowserActivity` の明示 Intent を返す。行の表示名はアプリ名（"FilesPlus"）になる。「SMB」と出すには行のバインダ `imm.b(View, imo)`（文字列 "com.android.shell.documents" など）にフックが要る → **後回し**（表示名は当面そのまま）。
+- 画像・動画を開く: `Intent(ACTION_VIEW).setDataAndType(uri, mime).setPackage(自分).addFlags(FLAG_GRANT_READ_URI_PERMISSION)` を `gateway.preview.PreviewActivity` エイリアスに渡せる（パッチ不要、単独ファイルのみで隣のファイルへはスワイプできない）。provider が `openProxyFileDescriptor` を返せば動画のシークも効く見込み（§9 #10 は実機で要確認）。
+- 分割（0.9）: ①依存と `SmbClientFactory`＋診断画面の「SMB テスト」→ ②`SmbVfs` コアと接続先の保存（Keystore）→ ③manifest パッチと最小の `SmbDocumentsProvider` → ④タップのフックと `SmbBrowserActivity` のひな形 → ⑤ブラウザ UI → ⑥サムネイル → ⑦FileOps／移動キュー連携。
+
 ### 5.3.1 SMB のサムネイルキャッシュ（0.5 で追加）
 **対象**: 一覧（リスト・グリッド）に出る**サムネイル**だけ。拡大表示や再生のときのデータはキャッシュしない。
 
