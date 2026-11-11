@@ -2,9 +2,12 @@ package app.filesplus.patches.foldertabs
 
 import app.filesplus.patches.misc.modKitIntegrationPatch
 import app.filesplus.patches.shared.Constants
+import app.morphe.patcher.extensions.InstructionExtensions.addInstruction
 import app.morphe.patcher.extensions.InstructionExtensions.addInstructions
+import app.morphe.patcher.extensions.InstructionExtensions.replaceInstruction
 import app.morphe.patcher.patch.bytecodePatch
 import app.morphe.patcher.util.proxy.mutableTypes.MutableClass
+import app.morphe.patcher.util.proxy.mutableTypes.MutableField
 import app.morphe.patcher.util.proxy.mutableTypes.MutableMethod
 import com.android.tools.smali.dexlib2.AccessFlags
 import com.android.tools.smali.dexlib2.Opcode
@@ -12,6 +15,7 @@ import com.android.tools.smali.dexlib2.builder.MutableMethodImplementation
 import com.android.tools.smali.dexlib2.iface.Method
 import com.android.tools.smali.dexlib2.iface.instruction.*
 import com.android.tools.smali.dexlib2.iface.reference.*
+import com.android.tools.smali.dexlib2.immutable.ImmutableField
 import com.android.tools.smali.dexlib2.immutable.ImmutableMethod
 import com.android.tools.smali.dexlib2.immutable.ImmutableMethodParameter
 
@@ -128,21 +132,47 @@ val showEmptyFolderTabsPatch = bytecodePatch(
             val constructor = owner.methods.single { it.name == "<init>" &&
                 it.parameterTypes.last().toString() == type }
             val sql = owner.fields.single { it.type == STRING }
-            val typeValue = if (owner == downloads) "const/16 v2, -0x64" else "move v2, p3"
-            val remember = owner.addEmptyTabsBridge("modKitRememberFolderQuery",
+            // R8 reuses the constructor's parameter registers, so the arguments are captured right after
+            // super() and the MediaStore call is made at every return from this-only state.
+            val filtersField = "${owner.type}->modKitFilters:$STRING"
+            val typeField = "${owner.type}->modKitType:I"
+            check(owner.fields.none { it.name == "modKitFilters" || it.name == "modKitType" })
+            owner.fields.add(MutableField(ImmutableField(owner.type, "modKitFilters", STRING,
+                AccessFlags.PRIVATE.value, null, emptySet(), emptySet())))
+            owner.fields.add(MutableField(ImmutableField(owner.type, "modKitType", "I",
+                AccessFlags.PRIVATE.value, null, emptySet(), emptySet())))
+            val typeValue = if (owner == downloads) "const/16 v1, -0x64" else "move v1, p3"
+            val capture = owner.addEmptyTabsBridge("modKitCaptureFolderQuery",
                 constructor.parameterTypes.map(CharSequence::toString), "V",
                 constructor.parameterTypes.size + 4, fallback = "return-void", body = """
                     invoke-virtual {p2}, $serializeFilters
                     move-result-object v0
-                    iget-object v1, p0, $sql
+                    iput-object v0, p0, $filtersField
                     $typeValue
-                    invoke-static {v0, v2, v1}, $HOOK->rememberQuery(${STRING}I$STRING)V
+                    iput v1, p0, $typeField
+                    return-void
+                """.trimIndent())
+            val remember = owner.addEmptyTabsBridge("modKitRememberFolderQuery", emptyList(), "V", 4,
+                fallback = "return-void", body = """
+                    iget-object v0, p0, $filtersField
+                    iget v1, p0, $typeField
+                    iget-object v2, p0, $sql
+                    invoke-static {v0, v1, v2}, $HOOK->rememberQuery(${STRING}I$STRING)V
                     return-void
                 """.trimIndent())
             val lastParameter = constructor.parameterTypes.size
-            for ((index) in constructor.code().withIndex().filter { it.value.opcode == Opcode.RETURN_VOID }.reversed()) {
-                constructor.addInstructions(index, "invoke-virtual/range {p0 .. p$lastParameter}, $remember")
+            val superInit = constructor.code().indexOfFirst { instruction ->
+                instruction.opcode == Opcode.INVOKE_DIRECT && (instruction.ref() as? MethodReference)?.let {
+                    it.name == "<init>" && it.definingClass == owner.superclass
+                } == true
             }
+            check(superInit >= 0) { "No super constructor call in ${owner.type}" }
+            // Returns can be branch targets; replacing keeps their labels on the hook, then the return follows.
+            for ((index) in constructor.code().withIndex().filter { it.value.opcode == Opcode.RETURN_VOID }.reversed()) {
+                constructor.replaceInstruction(index, "invoke-virtual {p0}, $remember")
+                constructor.addInstruction(index + 1, "return-void")
+            }
+            constructor.addInstructions(superInit + 1, "invoke-virtual/range {p0 .. p$lastParameter}, $capture")
         }
 
         val synthetic = tab.addEmptyTabsBridge("modKitEmptyFolderTab", listOf(STRING, STRING), tab.type, 7,
