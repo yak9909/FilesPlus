@@ -258,6 +258,7 @@ public final class FolderTabContext {
             currentFolder = folders.get(key);
             updateMenu();
             if (all || key == null || descriptor == null) {
+                DiagLog.i(AREA, "Tab without folder: key=" + key + ", all=" + all + ", descriptor=" + (descriptor != null));
                 currentFolder = null;
                 updateMenu();
                 return;
@@ -275,6 +276,10 @@ public final class FolderTabContext {
                     DiagLog.e(AREA, "Cannot resolve folder tab", t);
                 }
                 final String result = folder;
+                // Diagnostics (no adb): which tab resolved to which folder, and from what filter.
+                DiagLog.i(AREA, "Tab folder: key=" + key + " -> " + result + " (filters: name=" + descriptor.getString("name")
+                        + ", path=" + descriptor.getString("path") + ", prefix=" + descriptor.getString("prefix")
+                        + ", invalid=" + descriptor.getBoolean("invalid") + ")");
                 MAIN.post(() -> {
                     try {
                         if (generation != epoch) return;
