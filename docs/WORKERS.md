@@ -5,7 +5,7 @@ Delete a Codex session with `codex delete --force <id>` when its context is no l
 
 | Session ID | Model / effort | Purpose | Status |
 |------------|----------------|---------|--------|
-| subagent ae2bfee807193e868 | Claude sonnet / high | `smb` Task 1 (smbj dependency, SmbClientFactory, diagnostics "SMB test"), plan `docs/plans/2026-11-12-smb.md`, worktree `../ModdedFiles-wt/smb`, branch `w/smb` | Idle. Task 1 done and merged into dev (835eb5d) after an Opus review + fixes. Reuse for Task 2 via SendMessage if its context is useful (new tasks normally get a fresh agent). Next: write detailed steps for Task 2 in the plan. |
+| subagent afb468b20444485ff | Claude sonnet / high | `smb` Task 2 (SmbVfs, session pool, connection store with Keystore AES-GCM, Mod 設定 → SMB UI), plan `docs/plans/2026-11-12-smb.md`, worktree `../ModdedFiles-wt/smb`, branch `w/smb` | Idle (stopped at the usage threshold). Implemented + Opus-reviewed (no Critical, 4 Important) + fixes applied; built and patched OK; UNCOMMITTED in the worktree; the scoped re-review of the fixes is still pending (see HANDOFF.md item 0). Task 1 is in dev (835eb5d, dev.9). |
 | (none) | | | `queue` (DESIGN 5.4, tasks 1-3) finished and merged into dev (d1fc25d). Worktrees `../ModdedFiles-wt/{tabs,preview,queue}` (branches `w/tabs`, `w/preview`, `w/queue`) can be removed. No Codex sessions. |
 
 Launcher (Codex fallback): `scripts/codex-worker.sh` (start/resume). Prompts and logs: `worker-logs/` (git-ignored).
