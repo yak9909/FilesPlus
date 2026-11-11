@@ -47,6 +47,25 @@ Diagnostics remain enabled in either mode. The integration/settings worker owns 
 settings screen and Application initialization; this patch depends on its
 `modKitIntegrationPatch` entry point.
 
+## Device results (OPPO OPG02 = A54 5G, Android 12, v1.0.0-dev.2, 2026-11-11)
+
+Decoder limits (from the in-app diagnostics):
+- All hardware decoders (`c2.qti.*` / `OMX.qcom.*`, AVC/HEVC/VP9): max **1920 x 1920** per side, 1080p60 only. No 1440p or 2160p.
+- Software decoders: `c2.android.avc.decoder` max 2048 x 2048 (1080p60 OK). `c2.android.hevc.decoder` max 2048 x 2048 but not even 1080p60. VP9 software max 1280. AV1 software only (max 1280 / 1920x1072).
+- So any video with a side > 1920 cannot use the hardware decoder, and anything > 2048 has no platform decoder at all.
+
+Observed with a 1596 x 1996 AVC video (24 fps, 9.9 Mbps):
+- Media3 reported `support=3` (exceeds capabilities) and, thanks to the patch, still tried to play.
+- `c2.qti.avc.decoder` and `.low_latency` failed in `MediaCodec.configure` (IllegalArgumentException), because the height 1996 > 1920.
+- Decoder fallback (this patch) then initialized `c2.android.avc.decoder` (software) and no player error followed.
+- Fallback also applies to audio decoders (harmless; log line "candidates=[c2.android.aac.decoder]").
+- Log wording to fix: audio formats are logged as "Video input".
+
+Consequences for the plan (DESIGN §5.5):
+- 2K AVC whose sides are <= 2048 (e.g. 2048x1080, portrait ~1600x2000): L1 + L2 (software AVC) is the path. Smoothness still to be confirmed by the user.
+- 2560x1440 and 4K: no platform decoder can open them. Needs L4 (keyframe-only via a bundled decoder) or L3 (transcode), i.e. a bundled decoder (FFmpeg / dav1d) -> Phase 5-6.
+- HEVC above 1080p: software HEVC is too slow even for 1080p60; expect L3/L4 only.
+
 ## Fingerprints and hooks
 
 * Preview initialization: `bufferForPlaybackMs` / `maxBufferMs`, no parameters, void return,
