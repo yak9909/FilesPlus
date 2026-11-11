@@ -207,6 +207,15 @@ object SelectionStore {                         // プレビュー（§5.2）と
 ```
 **フック**: `FilePreviewActivity` のメニュー生成と、ページ切り替え（今表示しているファイルの通知）。
 
+**調査結果（2026-11-11、versionCode 2081362。難読化名は目印だけ。フィンガープリントには使わない）**
+- メニュー: `FilePreviewActivity` は器だけ。ギャラリーの fragment（`jju`、layout `fragment_file_preview_gallery`）が `(Menu, MenuInflater)V` で `R.menu.file_preview_menu`（0x7f0f000e）を inflate する（フォルダなどでは inflate せずに早く return する）。クリックは `aI(MenuItem)` の if 連鎖。目印の文字列: `"Fragment:onOptionsItemSelected"`、`"FilePreviewFragmentViewPager"`。項目は固定の int id で足し、選択が変わったら `invalidateOptionsMenu()` で作り直す。
+- 今のファイル: ページ切り替えは `jko`（ViewPager2 の OnPageChangeCallback、`G(int)` = onPageSelected）。fragment の peer（`jkt`）の `c()` が今のファイルの proto（`kqi`）を返す。`c()` は `d(I)` を呼び、`d` に文字列 `"File preview index is not valid."` がある。`kqi.r` = MediaStore id（`b & 131072`）、`kqi.k` = content URI（`b & 256`）。どちらもないファイルでは「選択」を出さない。
+- チェック印: ページのビューは使い回されるので、gallery の root（CoordinatorLayout。`toolbar` の親）に重ねるビューを1つだけ足す。クリックもフォーカスも受けないようにし、z 順に注意する（`scrim`、toolbar のグラデーション）。
+- 回転で Activity は作り直されない（configChanges あり）。選択は拡張の static（`LinkedHashMap<id, kqi>`、型は Object で持つ）に置く。プロセスが終われば消えてよい。
+- 一覧への引き継ぎ: 一覧の選択モデル（`lmq`、文字列 `SELECTED_DATA_STATE_TAG` / `SELECTION_DATA_SOURCE` で見つかる。MoveToCurrentTabPatch と同じ持ち主）の `(List)V`（`r`、`List<kqi>` を受ける）に、覚えておいた `kqi` を smali のブリッジで渡す。持ち主の resume や戻りでフックする。id だけから作り直すのは脆いので、`kqi` を持っておく。難しさは中〜やや脆い。
+
+**分割（0.8）**: ①調査（済）→ ②`SelectionStore` とプレビューのメニュー（選択／選択を解除／選択中 n 件）→ ③チェック印と一覧の選択モードへの引き継ぎ。
+
 ### 5.3 SMB 接続（フォルダと同じように扱う）
 
 **0.5 の訂正（解析結果）**: 元アプリは「その他のストレージ」に端末上の DocumentsProvider を列挙する（`gip` case 4）が、**項目をタップしても Files の中では開かない**。`imh.a()` が、一部の既知の provider（`imq.b`）はシステムのファイル画面（DocumentsUI）で開き、それ以外は **provider を持つアプリのランチャー画面を起動するだけ**（`getLaunchIntentForPackage`）。`DocumentsProviderBrowserActivity` は provider の一覧を出す画面で、中身を閲覧する画面ではない。したがって「provider を足せば Files 内でフォルダのように使える」という 0.4 までの前提は誤り。

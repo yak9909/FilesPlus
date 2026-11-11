@@ -21,7 +21,7 @@
 - 利用枠の見張り: 5時間枠 80%・週間枠 95% で中断処理（強制終了ではない。CLAUDE.md 参照）。
 
 ## 再開したらやること（順番）
-1. Phase 3 に入る: §5.2（プレビュー中の複数選択）から。DESIGN を読み、ワーカーへの依頼文を作って Sonnet のサブエージェントに任せる（新しい worktree `ModdedFiles-wt/<name>`、ブランチ `w/<name>` を `dev` から作る）。
+1. Phase 3 の §5.2（プレビュー中の複数選択）は**短い段階に分けて進める**（ユーザー指示）。①調査は済み（結果は DESIGN §5.2 の「調査結果」）。次は②`SelectionStore` とプレビューのメニュー。依頼文を作って Sonnet のサブエージェントに任せる（新しい worktree `ModdedFiles-wt/preview`、ブランチ `w/preview` を `dev` から作る）。そのあと③チェック印と一覧への引き継ぎ。
 2. 終わったらレビュー → worktree でコミット（`feat:`）→ `dev` にマージ → `bash scripts/build.sh --no-daemon` → `build/verify/` で全パッチを当てて確認（base.apk は `original/*.apkm` から取り出す）→ `git pull --no-rebase origin dev` → push → プレリリース。
 3. 実機確認はユーザーが最後にまとめて行うので、それまでは実装を進めてよい。
 
