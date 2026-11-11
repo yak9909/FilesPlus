@@ -23,21 +23,21 @@ import java.util.Collections;
 import java.util.List;
 
 /** File operations for "move selected files to the current folder tab". No app types, no UI. */
-final class TabMove {
+public final class TabMove {
     private static final String AREA = "foldertabs";
     private static final Uri FILES = MediaStore.Files.getContentUri("external");
     private static final int CHUNK = 400;
 
-    static final class Result {
-        int moved;
-        int skipped;
-        int failed;
+    public static final class Result {
+        public int moved;
+        public int skipped;
+        public int failed;
     }
 
     private TabMove() {}
 
     /** Resolves MediaStore ids to file paths. Blocking: call off the UI thread. */
-    static List<String> pathsOf(Context context, long[] ids) {
+    public static List<String> pathsOf(Context context, long[] ids) {
         List<String> paths = new ArrayList<>();
         for (int from = 0; from < ids.length; from += CHUNK) {
             int to = Math.min(ids.length, from + CHUNK);
@@ -56,7 +56,7 @@ final class TabMove {
     }
 
     /** Moves every source into the destination folder, keeping both on a name clash. Blocking. */
-    static Result move(Context context, List<String> sources, File destination) {
+    public static Result move(Context context, List<String> sources, File destination) {
         Result result = new Result();
         List<String> oldPaths = new ArrayList<>();
         List<String> newPaths = new ArrayList<>();
