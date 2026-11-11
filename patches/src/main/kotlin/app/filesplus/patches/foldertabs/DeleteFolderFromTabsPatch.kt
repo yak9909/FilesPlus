@@ -187,7 +187,7 @@ internal val folderTabContextPatch = bytecodePatch {
             iput-object v0, p0, $context
             invoke-virtual {p0}, $selected
         """.trimIndent())
-        initialize.beforeReturns("invoke-virtual {p0, p1}, $attach")
+        pager.afterOriginal(initialize, "invoke-virtual {p0, p1}, $attach")
 
         // Native page callback and list subscriber are found through their controller field and work.
         val pageCallback = mutableClassDefBy(classDefBy { cls ->
@@ -202,8 +202,9 @@ internal val folderTabContextPatch = bytecodePatch {
             iget-object v0, p0, $pageOwner
             invoke-virtual {v0}, $selected
         """.trimIndent())
-        pageCallback.methods.single { it.parameterTypes == listOf("I") && it.returnType == "V" }
-            .beforeReturns("invoke-virtual {p0}, $pageBridge")
+        pageCallback.afterOriginal(pageCallback.methods.single {
+            it.parameterTypes == listOf("I") && it.returnType == "V"
+        }, "invoke-virtual {p0}, $pageBridge")
         val loaded = mutableClassDefBy(classDefBy { it.methods.any { m -> m.string("Failed to refresh the page.") } })
         val loadedOwner = loaded.fields.single { it.type == pager.type }
         val changed = pager.bridge("modKitFolderList", listOf(LIST), 4, """
@@ -222,15 +223,16 @@ internal val folderTabContextPatch = bytecodePatch {
             check-cast p1, $LIST
             invoke-virtual {v0, p1}, $changed
         """.trimIndent())
-        loaded.methods.single { it.string("Failed to refresh the page.") }
-            .beforeReturns("invoke-virtual {p0, p1}, $loadedBridge")
+        loaded.afterOriginal(loaded.methods.single { it.string("Failed to refresh the page.") },
+            "invoke-virtual {p0, p1}, $loadedBridge")
         val loadFailed = loaded.bridge("modKitFolderLoadFailed", emptyList(), 3, """
             iget-object v0, p0, $loadedOwner
             const/4 v1, 0x0
             invoke-virtual {v0, v1}, $changed
         """.trimIndent())
-        loaded.methods.single { it.parameterTypes == listOf("Ljava/lang/Throwable;") && it.returnType == "V" }
-            .beforeReturns("invoke-virtual {p0}, $loadFailed")
+        loaded.afterOriginal(loaded.methods.single {
+            it.parameterTypes == listOf("Ljava/lang/Throwable;") && it.returnType == "V"
+        }, "invoke-virtual {p0}, $loadFailed")
 
         // lrx.h(Uri) is the app's MediaStore invalidation path used by its ContentObserver.
         val source = pager.fields.single { it.type == collections.type }
@@ -298,7 +300,7 @@ val deleteFolderFromTabsPatch = bytecodePatch(
             iget-boolean v1, p0, $selection
             invoke-static {v0, p1, v1}, $HOOK->onMenu(${VIEW}Landroid/view/Menu;Z)V
         """.trimIndent())
-        createMenu.beforeReturns("invoke-virtual {p0, p1}, $menuBridge")
+        menuOwner.afterOriginal(createMenu, "invoke-virtual {p0, p1}, $menuBridge")
     }
 }
 
@@ -330,8 +332,37 @@ internal fun MutableClass.bridge(
     return method
 }
 
-private fun MutableMethod.beforeReturns(instruction: String) {
-    val returns = code().withIndex().filter { it.value.opcode == Opcode.RETURN_VOID }
-    check(returns.isNotEmpty())
-    for ((index) in returns.reversed()) addInstructions(index, instruction)
+/**
+ * Runs [after] (smali that may only use the wrapper's p registers) once the original void instance method has
+ * finished on any path. The original body moves to a private method and the old name becomes a thin wrapper.
+ * Inserting before each return-void is not safe: R8 reuses parameter registers (p0/p1 may no longer hold the
+ * arguments there, which ART rejects at class verification), and a branch to a return-void skips the insertion.
+ */
+internal fun MutableClass.afterOriginal(target: MutableMethod, after: String) {
+    check(target.returnType == "V" && target.name != "<init>" && !AccessFlags.STATIC.isSet(target.accessFlags)) {
+        "Cannot wrap $target"
+    }
+    check(listOf(AccessFlags.ABSTRACT, AccessFlags.NATIVE, AccessFlags.SYNCHRONIZED).none { it.isSet(target.accessFlags) })
+    val parameters = target.parameterTypes.map(CharSequence::toString)
+    val registers = 1 + parameters.sumOf { if (it == "J" || it == "D") 2 else 1 }
+    val name = target.name
+    val flags = target.accessFlags
+    val renamed = "modKitOriginal\$$name\$${parameters.size}"
+    check(methods.none { it.name == renamed }) { "Original method already wrapped: $type->$renamed" }
+    check(methods.remove(target)) { "Cannot detach $target" }
+    target.name = renamed
+    target.accessFlags = (flags and (AccessFlags.PUBLIC.value or AccessFlags.PROTECTED.value or
+        AccessFlags.BRIDGE.value or AccessFlags.VARARGS.value).inv()) or
+        AccessFlags.PRIVATE.value
+    methods.add(target)
+
+    val wrapper = MutableMethod(ImmutableMethod(type, name,
+        parameters.map { ImmutableMethodParameter(it, emptySet(), null) }, "V", flags,
+        emptySet(), emptySet(), MutableMethodImplementation(registers)))
+    wrapper.addInstructions(0, """
+        invoke-direct/range {p0 .. p${registers - 1}}, $target
+        $after
+        return-void
+    """.trimIndent())
+    methods.add(wrapper)
 }

@@ -97,10 +97,6 @@ val moveToCurrentTabPatch = bytecodePatch(
             invoke-static {v2, v1, v4, v5, p0}, $HOOK->onSelectionMenu(${VIEW}${MENU}${LIST}${LIST}${RUNNABLE})V
             :done
         """.trimIndent())
-        val returns = onSelection.code().withIndex().filter { it.value.opcode == Opcode.RETURN_VOID }
-        check(returns.isNotEmpty())
-        for ((index) in returns.reversed()) {
-            (onSelection as MutableMethod).addInstructions(index, "invoke-virtual/range {p0 .. p1}, $menuBridge")
-        }
+        owner.afterOriginal(onSelection, "invoke-virtual {p0, p1}, $menuBridge")
     }
 }
