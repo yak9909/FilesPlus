@@ -21,6 +21,8 @@ import android.view.WindowInsets;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.RadioButton;
+import android.widget.RadioGroup;
 import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.TextView;
@@ -28,7 +30,15 @@ import android.widget.Toast;
 import app.filesplus.extension.DiagLog;
 import app.filesplus.extension.ModKit;
 import app.filesplus.extension.ModSettings;
+import app.filesplus.extension.smb.SmbConnection;
+import app.filesplus.extension.smb.SmbConnectionStore;
+import app.filesplus.extension.smb.SmbEntry;
+import app.filesplus.extension.smb.SmbErrors;
+import app.filesplus.extension.smb.SmbPath;
+import app.filesplus.extension.smb.SmbSessionPool;
 import app.filesplus.extension.smb.SmbTester;
+import app.filesplus.extension.smb.SmbVfs;
+import java.io.InputStream;
 import java.util.Collections;
 import java.util.List;
 
@@ -44,6 +54,20 @@ public final class ModSettingsActivity extends Activity {
     private String decoderReport = "";
     private Button shareButton;
     private AlertDialog smbDialog;
+    private LinearLayout smbList;
+
+    /** The input fields of the SMB connection dialog. */
+    private static final class SmbForm {
+        EditText name;
+        EditText host;
+        EditText port;
+        EditText share;
+        EditText start;
+        EditText user;
+        EditText password;
+        EditText domain;
+        RadioButton openStart;
+    }
 
     @Override
     protected void onCreate(Bundle state) {
@@ -86,6 +110,7 @@ public final class ModSettingsActivity extends Activity {
             scroll.addView(sections);
             addSkipSection();
             addFolderTabsSection();
+            addSmbSection();
             addDiagnosticsSection();
         } catch (Throwable t) {
             DiagLog.e("settings", "Cannot build settings screen", t);
@@ -198,7 +223,303 @@ public final class ModSettingsActivity extends Activity {
         }, "ModKit-diagnostics").start();
     }
 
+    private void addSmbSection() {
+        header("SMB");
+        smbList = new LinearLayout(this);
+        smbList.setOrientation(LinearLayout.VERTICAL);
+        sections.addView(smbList);
+        refreshSmbList();
+    }
+
+    private void refreshSmbList() {
+        smbList.removeAllViews();
+        for (SmbConnection c : SmbConnectionStore.all()) {
+            LinearLayout row = settingsRow(c.label(), smbSummary(c));
+            row.setOnClickListener(v -> safely(() -> showSmbEditDialog(c)));
+            row.setOnLongClickListener(v -> {
+                safely(() -> showSmbMenu(c));
+                return true;
+            });
+            smbList.addView(row);
+        }
+        LinearLayout add = settingsRow(tr("＋ 接続先を追加", "+ Add a connection"), null);
+        add.setOnClickListener(v -> safely(() -> showSmbEditDialog(null)));
+        smbList.addView(add);
+    }
+
+    /** host[:port]/share[/folder] and the account; never anything secret. */
+    private String smbSummary(SmbConnection c) {
+        StringBuilder line = new StringBuilder(c.host);
+        if (c.port != 445) line.append(':').append(c.port);
+        line.append('/').append(c.share);
+        if (!c.startPath.isEmpty()) line.append('/').append(c.startPath);
+        line.append(" · ").append(c.user.isEmpty() ? tr("ゲスト", "Guest") : c.user);
+        if (!c.user.isEmpty() && !SmbConnectionStore.hasPassword(c.id)) {
+            line.append(" · ").append(tr("パスワード未入力", "no password"));
+        }
+        return line.toString();
+    }
+
+    private void showSmbMenu(SmbConnection c) {
+        String[] items = {tr("編集", "Edit"), tr("名前の変更", "Rename"), tr("削除", "Delete")};
+        showSmbDialog(new AlertDialog.Builder(this).setTitle(c.label())
+                .setItems(items, (dialog, which) -> safely(() -> {
+                    if (which == 0) showSmbEditDialog(c);
+                    else if (which == 1) showSmbRenameDialog(c);
+                    else showSmbDeleteDialog(c);
+                })).create());
+    }
+
+    private void showSmbRenameDialog(SmbConnection c) {
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setInputType(InputType.TYPE_CLASS_TEXT);
+        input.setHint(c.host + "/" + c.share);
+        input.setText(c.displayName);
+        input.selectAll();
+        LinearLayout container = new LinearLayout(this);
+        container.setPadding(dp(24), dp(8), dp(24), 0);
+        container.addView(input, new LinearLayout.LayoutParams(-1, -2));
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle(tr("名前の変更", "Rename")).setView(container)
+                .setPositiveButton(tr("保存", "Save"), (d, which) -> safely(() -> {
+                    // Asynchronous write; sessions and the password are untouched.
+                    SmbConnectionStore.setDisplayName(c.id, input.getText().toString());
+                    refreshSmbList();
+                }))
+                .setNegativeButton(tr("キャンセル", "Cancel"), null).create();
+        showSmbDialog(dialog);
+    }
+
+    private void showSmbDeleteDialog(SmbConnection c) {
+        showSmbDialog(new AlertDialog.Builder(this).setTitle(tr("接続先の削除", "Delete connection"))
+                .setMessage(tr("「" + c.label() + "」を削除します。保存したパスワードも消えます。",
+                        "Delete \"" + c.label() + "\"? The saved password is removed too."))
+                .setPositiveButton(tr("削除", "Delete"), (d, which) -> safely(() -> {
+                    SmbConnectionStore.delete(c.id);
+                    refreshSmbList();
+                }))
+                .setNegativeButton(tr("キャンセル", "Cancel"), null).create());
+    }
+
+    /** Add (existing == null) or edit dialog. The password field is never prefilled. */
+    private void showSmbEditDialog(SmbConnection existing) {
+        boolean adding = existing == null;
+        SmbForm f = new SmbForm();
+        LinearLayout form = new LinearLayout(this);
+        form.setOrientation(LinearLayout.VERTICAL);
+        form.setPadding(dp(24), dp(8), dp(24), 0);
+        int plain = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
+        f.name = smbField(form, tr("表示名（任意）", "Display name (optional)"), InputType.TYPE_CLASS_TEXT);
+        f.host = smbField(form, tr("ホスト（例: 192.168.0.10）", "Host (e.g. 192.168.0.10)"), plain | InputType.TYPE_TEXT_VARIATION_URI);
+        f.port = smbField(form, tr("ポート", "Port"), InputType.TYPE_CLASS_NUMBER);
+        f.share = smbField(form, tr("共有名（必須）", "Share name (required)"), plain);
+        f.start = smbField(form, tr("開始フォルダ（任意。例: Videos/2024）", "Start folder (optional, e.g. Videos/2024)"), plain);
+        f.user = smbField(form, tr("ユーザー（空欄でゲスト）", "User (blank for guest)"), plain);
+        f.password = smbField(form, tr("パスワード", "Password"),
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        f.domain = smbField(form, tr("ドメイン（任意）", "Domain (optional)"), plain);
+        TextView openLabel = text(tr("開く場所", "Open at"), 14, secondary);
+        openLabel.setPadding(0, dp(12), 0, 0);
+        form.addView(openLabel);
+        RadioGroup open = new RadioGroup(this);
+        f.openStart = new RadioButton(this);
+        f.openStart.setText(tr("開始フォルダ", "Start folder"));
+        RadioButton openLast = new RadioButton(this);
+        openLast.setText(tr("前回開いていたフォルダ", "Last folder"));
+        f.openStart.setTextColor(primary);
+        openLast.setTextColor(primary);
+        open.addView(f.openStart);
+        open.addView(openLast);
+        form.addView(open);
+        if (adding) {
+            f.port.setText("445");
+            openLast.setChecked(true);
+        } else {
+            f.name.setText(existing.displayName);
+            f.host.setText(existing.host);
+            f.port.setText(String.valueOf(existing.port));
+            f.share.setText(existing.share);
+            f.start.setText(existing.startPath);
+            f.user.setText(existing.user);
+            f.domain.setText(existing.domain);
+            f.openStart.setChecked(SmbConnection.OPEN_START.equals(existing.openWhere));
+            openLast.setChecked(!f.openStart.isChecked());
+        }
+        TextView status = text("", 14, secondary);
+        status.setTextIsSelectable(true);
+        status.setPadding(0, dp(12), 0, dp(8));
+        form.addView(status);
+        if (!adding && SmbConnectionStore.hasPassword(existing.id)) {
+            f.password.setHint(tr("パスワード（空欄で変更しない）", "Password (blank keeps it)"));
+            // Decrypting uses the Keystore, so check in the background and adjust the hint afterwards.
+            new Thread(() -> {
+                if (SmbConnectionStore.passwordReadable(existing.id)) return;
+                runOnUiThread(() -> safely(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    f.password.setHint(tr("パスワード（再入力が必要）", "Password (enter it again)"));
+                    if (status.getText().length() == 0) {
+                        status.setText(tr("保存したパスワードを読み出せません。もう一度入力してください。",
+                                "The saved password cannot be read. Please enter it again."));
+                    }
+                }));
+            }, "ModKit-smb-check").start();
+        }
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(form);
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(adding ? tr("接続先を追加", "Add connection") : tr("接続先を編集", "Edit connection")).setView(scroll)
+                .setPositiveButton(tr("保存", "Save"), null)
+                .setNeutralButton(tr("接続テスト", "Test"), null)
+                .setNegativeButton(tr("キャンセル", "Cancel"), null).create();
+        // Overridden in onShow so a failed validation keeps the dialog open.
+        dialog.setOnShowListener(ignored -> {
+            Button save = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+            Button test = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
+            save.setOnClickListener(v -> safely(() -> saveSmbForm(dialog, f, existing, status, save, test)));
+            test.setOnClickListener(v -> safely(() -> testSmbForm(dialog, f, existing, status, save, test)));
+        });
+        showSmbDialog(dialog);
+    }
+
+    /** Builds a connection from the form, or returns null after marking the invalid fields. */
+    private SmbConnection readSmbForm(SmbForm f, SmbConnection existing) {
+        int port = validateSmbTarget(f.host, f.port, f.share);
+        String start = f.start.getText().toString();
+        boolean valid = port >= 0;
+        try {
+            start = SmbPath.normalize(start);
+        } catch (IllegalArgumentException e) {
+            f.start.setError(tr("「..」は使えません", "\"..\" is not allowed"));
+            valid = false;
+        }
+        if (!valid) return null;
+        SmbConnection c = new SmbConnection(existing == null ? null : existing.id, f.name.getText().toString(),
+                f.host.getText().toString(), port, f.share.getText().toString(), start, f.user.getText().toString(),
+                f.domain.getText().toString(),
+                f.openStart.isChecked() ? SmbConnection.OPEN_START : SmbConnection.OPEN_LAST,
+                existing == null ? "" : existing.lastPath);
+        // A blank password means "keep the saved one", which must never be sent to a different server or account.
+        if (existing != null && !c.user.isEmpty() && f.password.getText().length() == 0
+                && !c.credentialKey().equals(existing.credentialKey())) {
+            f.password.setError(tr("ホスト・ユーザーを変えたときはパスワードを入力してください",
+                    "Enter the password when the host or user changes"));
+            return null;
+        }
+        return c;
+    }
+
+    private void saveSmbForm(AlertDialog dialog, SmbForm f, SmbConnection existing, TextView status, Button save,
+            Button test) {
+        SmbConnection c = readSmbForm(f, existing);
+        if (c == null) return;
+        // null keeps the stored password, "" removes it (a guest needs none).
+        String typed = f.password.getText().toString();
+        String password = c.user.isEmpty() ? "" : (typed.isEmpty() ? null : typed);
+        save.setEnabled(false);
+        test.setEnabled(false);
+        status.setText(tr("保存中…", "Saving…"));
+        // Encrypting the password may use the Keystore, so keep it off the UI thread.
+        new Thread(() -> {
+            boolean saved = SmbConnectionStore.save(c, password);
+            runOnUiThread(() -> safely(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                if (saved) {
+                    dialog.dismiss();
+                    refreshSmbList();
+                } else {
+                    status.setText(tr("保存できませんでした（パスワードを暗号化できない、または保存データが壊れています）",
+                            "Could not save (the password cannot be encrypted, or the saved data is damaged)"));
+                    save.setEnabled(true);
+                    test.setEnabled(true);
+                }
+            }));
+        }, "ModKit-smb-save").start();
+    }
+
+    private void testSmbForm(AlertDialog dialog, SmbForm f, SmbConnection existing, TextView status, Button save,
+            Button test) {
+        SmbConnection c = readSmbForm(f, existing);
+        if (c == null) return;
+        String typed = f.password.getText().toString();
+        save.setEnabled(false);
+        test.setEnabled(false);
+        status.setText(tr("接続中…", "Connecting…"));
+        // Network I/O must stay off the UI thread.
+        new Thread(() -> {
+            String result = runSmbConnectionTest(c, typed, existing);
+            runOnUiThread(() -> safely(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                status.setText(result);
+                save.setEnabled(true);
+                test.setEnabled(true);
+                refreshLog();
+            }));
+        }, "ModKit-smb-conn-test").start();
+    }
+
+    /** One-line result of listing, stat and a 1 KB read with the entered (possibly unsaved) values. */
+    private String runSmbConnectionTest(SmbConnection c, String typedPassword, SmbConnection existing) {
+        // A throwaway id keeps the test away from the pooled session of the saved connection.
+        SmbConnection probe = new SmbConnection(SmbConnection.newId(), c.displayName, c.host, c.port, c.share,
+                c.startPath, c.user, c.domain, c.openWhere, "");
+        String password = null;
+        if (!c.user.isEmpty()) {
+            password = !typedPassword.isEmpty() ? typedPassword
+                    : (existing == null ? null : SmbConnectionStore.password(existing.id));
+            // Never guess an empty password: repeated failed logons can lock the account.
+            if (password == null) return tr("パスワードを入力してください", "Enter the password");
+        }
+        long started = System.currentTimeMillis();
+        try {
+            SmbVfs vfs = new SmbVfs(probe, password);
+            List<SmbEntry> entries = vfs.list(probe.startPath);
+            vfs.stat(probe.startPath);
+            StringBuilder result = new StringBuilder("OK: ").append(entries.size()).append(tr(" 件", " entries"));
+            SmbEntry firstFile = null;
+            for (SmbEntry entry : entries) {
+                if (!entry.isDir) {
+                    firstFile = entry;
+                    break;
+                }
+            }
+            if (firstFile != null) {
+                try (InputStream in = vfs.openRead(SmbPath.join(probe.startPath, firstFile.name), 0)) {
+                    int count = in.read(new byte[1024]);
+                    result.append(tr("、先頭 ", ", read ")).append(Math.max(count, 0)).append(" bytes (")
+                            .append(firstFile.name).append(')');
+                } catch (Throwable t) {
+                    result.append(tr("、読み取り失敗: ", ", read failed: ")).append(SmbErrors.describe(t));
+                }
+            }
+            return result.append(" · ").append(System.currentTimeMillis() - started).append(" ms").toString();
+        } catch (Throwable t) {
+            DiagLog.i("smb", "Connection test failed: " + SmbErrors.describe(t));
+            return smbErrorText(t);
+        } finally {
+            SmbSessionPool.close(probe.id);
+        }
+    }
+
+    /** A short, readable one-liner for a failure; the technical detail follows in parentheses. */
+    private String smbErrorText(Throwable t) {
+        String detail = " (" + SmbErrors.describe(t) + ")";
+        if (SmbErrors.isPasswordMissing(t)) return tr("パスワードが読めません。入力し直してください", "Password unreadable, please re-enter");
+        if (SmbErrors.isAuthFailure(t)) return tr("ユーザー名またはパスワードが違います", "Wrong user name or password") + detail;
+        if (SmbErrors.hasStatus(t, "STATUS_BAD_NETWORK_NAME")) return tr("共有名が見つかりません", "Share not found") + detail;
+        if (SmbErrors.isNotFound(t)) return tr("開始フォルダが見つかりません", "Start folder not found") + detail;
+        if (SmbErrors.isUnreachable(t)) return tr("サーバーに接続できません", "Cannot reach the server") + detail;
+        return tr("失敗", "Failed") + detail;
+    }
+
     private void addSmbTestRow() {
+        LinearLayout row = settingsRow(tr("SMB テスト", "SMB test"),
+                tr("接続・一覧・先頭 1 KB の読み取りを確かめます", "Checks connect, listing and a 1 KB read"));
+        row.setOnClickListener(v -> safely(this::showSmbTestDialog));
+        sections.addView(row);
+    }
+
+    /** A tappable two-line settings row (title and optional subtitle) in the style of the skip rows. */
+    private LinearLayout settingsRow(String title, String subtitle) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.VERTICAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
@@ -208,11 +529,10 @@ public final class ModSettingsActivity extends Activity {
         if (getTheme().resolveAttribute(android.R.attr.selectableItemBackground, background, true)) {
             row.setBackgroundResource(background.resourceId);
         }
-        row.addView(text(tr("SMB テスト", "SMB test"), 16, primary));
-        row.addView(text(tr("接続・一覧・先頭 1 KB の読み取りを確かめます", "Checks connect, listing and a 1 KB read"), 14, secondary));
+        row.addView(text(title, 16, primary));
+        if (subtitle != null && !subtitle.isEmpty()) row.addView(text(subtitle, 14, secondary));
         row.setFocusable(true);
-        row.setOnClickListener(v -> safely(this::showSmbTestDialog));
-        sections.addView(row);
+        return row;
     }
 
     private void showSmbTestDialog() {
@@ -236,28 +556,10 @@ public final class ModSettingsActivity extends Activity {
                 .setNegativeButton(tr("キャンセル", "Cancel"), null).create();
         dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
                 .setOnClickListener(v -> safely(() -> {
+                    int portValue = validateSmbTarget(host, port, share);
+                    if (portValue < 0) return;
                     String hostValue = host.getText().toString().trim();
                     String shareValue = share.getText().toString().trim();
-                    int portValue;
-                    try {
-                        portValue = Integer.parseInt(port.getText().toString().trim());
-                    } catch (NumberFormatException e) {
-                        portValue = 0;
-                    }
-                    boolean valid = true;
-                    if (hostValue.isEmpty()) {
-                        host.setError(tr("ホストを入力してください", "Enter a host"));
-                        valid = false;
-                    }
-                    if (portValue < 1 || portValue > 65535) {
-                        port.setError(tr("1〜65535の整数を入力してください", "Enter a number from 1 to 65535"));
-                        valid = false;
-                    }
-                    if (shareValue.isEmpty()) {
-                        share.setError(tr("共有名を入力してください", "Enter a share name"));
-                        valid = false;
-                    }
-                    if (!valid) return;
                     String userValue = user.getText().toString();
                     String passwordValue = password.getText().toString();
                     String domainValue = domain.getText().toString();
@@ -278,8 +580,38 @@ public final class ModSettingsActivity extends Activity {
         if ((inputType & InputType.TYPE_MASK_VARIATION) == InputType.TYPE_TEXT_VARIATION_PASSWORD) {
             field.setTransformationMethod(PasswordTransformationMethod.getInstance());
         }
+        // Keep credentials away from the system autofill service.
+        field.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
         form.addView(field, new LinearLayout.LayoutParams(-1, -2));
         return field;
+    }
+
+    /** Checks host, port and share; returns the port, or -1 after marking the invalid fields. */
+    private int validateSmbTarget(EditText host, EditText port, EditText share) {
+        int portValue;
+        try {
+            portValue = Integer.parseInt(port.getText().toString().trim());
+        } catch (NumberFormatException e) {
+            portValue = 0;
+        }
+        boolean valid = true;
+        if (host.getText().toString().trim().isEmpty()) {
+            host.setError(tr("ホストを入力してください", "Enter a host"));
+            valid = false;
+        }
+        if (portValue < 1 || portValue > 65535) {
+            port.setError(tr("1〜65535の整数を入力してください", "Enter a number from 1 to 65535"));
+            valid = false;
+        }
+        String shareValue = share.getText().toString().trim();
+        if (shareValue.isEmpty()) {
+            share.setError(tr("共有名を入力してください", "Enter a share name"));
+            valid = false;
+        } else if (shareValue.indexOf('/') >= 0 || shareValue.indexOf('\\') >= 0) {
+            share.setError(tr("共有名に / や \\ は使えません（フォルダは開始フォルダに入力）", "No / or \\ in the share name (use the start folder)"));
+            valid = false;
+        }
+        return valid ? portValue : -1;
     }
 
     private void runSmbTest(String host, int port, String user, String password, String domain, String share, String path) {
