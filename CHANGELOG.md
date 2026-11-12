@@ -4,6 +4,14 @@
 
 * Add FilesLook (reuse the app's layouts by name) and a UI sample in diagnostics ([1c5f14d](https://github.com/yak9909/FilesPlus/commit/1c5f14d9e13476a0ad96833b2fa5e2aba2e2bf32))
 * Add the browse core (Location, BrowseSource, LocalSource, ThumbLoader) ([a8a168e](https://github.com/yak9909/FilesPlus/commit/a8a168e9a09234835faee6c75c13073d594f2bf8))
+* Add the destination browser (BrowseActivity, pick mode) with a diagnostics test entry ([2801de1](https://github.com/yak9909/FilesPlus/commit/2801de174bf13a9f9f625cf290ee00021deba850))
+
+## [1.0.0-dev.18](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.17...v1.0.0-dev.18) (2026-11-12)
+
+### ✨ New Features
+
+* Add FilesLook (reuse the app's layouts by name) and a UI sample in diagnostics ([1c5f14d](https://github.com/yak9909/FilesPlus/commit/1c5f14d9e13476a0ad96833b2fa5e2aba2e2bf32))
+* Add the browse core (Location, BrowseSource, LocalSource, ThumbLoader) ([a8a168e](https://github.com/yak9909/FilesPlus/commit/a8a168e9a09234835faee6c75c13073d594f2bf8))
 
 ## [1.0.0-dev.18](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.17...v1.0.0-dev.18) (2026-11-12)
 
