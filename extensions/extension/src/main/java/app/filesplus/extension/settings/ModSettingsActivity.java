@@ -31,6 +31,8 @@ import android.widget.Toast;
 import app.filesplus.extension.DiagLog;
 import app.filesplus.extension.ModKit;
 import app.filesplus.extension.ModSettings;
+import app.filesplus.extension.browse.Location;
+import app.filesplus.extension.browse.PickRequests;
 import app.filesplus.extension.smb.SmbClientFactory;
 import app.filesplus.extension.smb.SmbConnection;
 import app.filesplus.extension.smb.SmbConnectionStore;
@@ -205,6 +207,10 @@ public final class ModSettingsActivity extends Activity {
             UiSample.show(this, japanese);
             refreshLog();
         }));
+        View browserTest = look.row(sections, tr("移動先ブラウザ（テスト）", "Destination browser (test)"),
+                tr("移動先を選んで、選んだ場所を表示します（何も移動しません）。移動元は DCIM/Camera として扱います",
+                        "Pick a destination and show it (nothing is moved). The source counts as DCIM/Camera")).view;
+        browserTest.setOnClickListener(v -> safely(this::testDestinationBrowser));
         shareRow = look.row(sections, tr("テキストで共有", "Share as text"), null);
         shareRow.setEnabledLook(false);
         shareRow.view.setOnClickListener(v -> safely(this::shareDiagnostics));
@@ -252,6 +258,20 @@ public final class ModSettingsActivity extends Activity {
                 refreshLog();
             }));
         }, "ModKit-diagnostics").start();
+    }
+
+    /** Temporary entry for the destination browser (until the Move takeover uses it): shows the picked place. */
+    private void testDestinationBrowser() {
+        java.io.File camera = new java.io.File(android.os.Environment.getExternalStorageDirectory(), "DCIM/Camera");
+        PickRequests.PickSpec spec = new PickRequests.PickSpec(null, 3,
+                Collections.singletonList(Location.local(camera)), Collections.<Location>emptyList());
+        // This activity may be recreated while the browser is on top: the callback only uses the app context.
+        android.content.Context app = getApplicationContext();
+        boolean ja = japanese;
+        PickRequests.start(this, spec, picked -> {
+            DiagLog.i("browse", "Test pick: " + picked);
+            Toast.makeText(app, (ja ? "選んだ移動先: " : "Picked: ") + picked, Toast.LENGTH_LONG).show();
+        });
     }
 
     private void addSmbSection() {
