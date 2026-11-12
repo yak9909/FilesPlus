@@ -8,7 +8,6 @@ import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
-import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.storage.StorageManager;
@@ -22,6 +21,7 @@ import android.widget.Toast;
 import app.filesplus.extension.DiagLog;
 import app.filesplus.extension.ModKit;
 import app.filesplus.extension.ModSettings;
+import app.filesplus.extension.browse.LocalFolders;
 
 import java.io.File;
 import java.io.IOException;
@@ -53,7 +53,7 @@ public final class FolderTabContext {
     private static final Uri FILES = MediaStore.Files.getContentUri("external");
     private static final ExecutorService WORKER = Executors.newSingleThreadExecutor();
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
-    private static final String KNOWN_PREFIX = "tabs.knownFolders.";
+    private static final String KNOWN_PREFIX = LocalFolders.KNOWN_PREFIX;
     private static final Object KNOWN_LOCK = new Object();
     private static final Map<String, String> TAB_QUERIES = new LinkedHashMap<>();
     private static final Set<String> STANDARD = new HashSet<>(Arrays.asList(
@@ -137,7 +137,7 @@ public final class FolderTabContext {
                 Set<String> saved = prefs.getStringSet(key, Collections.emptySet());
                 Set<String> known = new HashSet<>(saved);
                 known.removeIf(path -> !new File(path).isDirectory());
-                List<File> volumes = roots(context);
+                List<File> volumes = LocalFolders.roots(context);
                 Set<String> names = new HashSet<>();
                 Set<String> present = new HashSet<>();
                 Set<String> selections = new HashSet<>();
@@ -173,7 +173,7 @@ public final class FolderTabContext {
                             String relative = cursor.getString(0);
                             File volume = byVolume.get(cursor.getString(1));
                             if (relative == null || volume == null) continue;
-                            String folder = folderPath(new File(volume, relative), volumes);
+                            String folder = LocalFolders.folderPath(new File(volume, relative), volumes);
                             if (folder != null) present.add(folder);
                         }
                     }
@@ -189,7 +189,7 @@ public final class FolderTabContext {
                     if (present.contains(path) || names.contains(folder.getName().toLowerCase(Locale.ROOT))) continue;
                     if ((!hidden && folder.getName().startsWith(".")) || protectedPath(folder, volumes, false)) continue;
                     // Canonical equality also excludes symlinks and paths that escape mounted storage.
-                    if (path.equals(folderPath(folder, volumes))) added.add(path);
+                    if (path.equals(LocalFolders.folderPath(folder, volumes))) added.add(path);
                 }
                 added.sort((left, right) -> {
                     int order = new File(left).getName().toLowerCase(Locale.getDefault())
@@ -514,7 +514,7 @@ public final class FolderTabContext {
         WORKER.execute(() -> {
             try {
                 final long[] census = countFiles(folder.toPath());
-                File volume = volumeRoot(activity, folder);
+                File volume = LocalFolders.volumeRoot(activity, folder);
                 final String trashPath = volume == null ? null : FolderTrash.trashRoot(volume).getPath();
                 MAIN.post(() -> {
                     try {
@@ -569,7 +569,7 @@ public final class FolderTabContext {
                     throw new IOException((refused[0] == 1 ? "Protected folder" : "Folder changed or removed")
                             + ", nothing moved: " + folder);
                 }
-                File volume = volumeRoot(context, folder);
+                File volume = LocalFolders.volumeRoot(context, folder);
                 if (volume == null) throw new IOException("No storage volume for " + folder + ", nothing moved");
                 List<String> mediaPaths = FolderTrash.mediaPaths(context, folder);
                 moved[0] = FolderTrash.moveToTrash(folder, volume, fileCount, totalBytes);
@@ -614,17 +614,6 @@ public final class FolderTabContext {
         });
     }
 
-    /** The storage volume root that contains {@code folder} (same canonical roots as the folder tabs). */
-    private static File volumeRoot(Context context, File folder) throws IOException {
-        File canonical = folder.getCanonicalFile();
-        File best = null;
-        for (File root : roots(context)) {
-            if (canonical.getPath().startsWith(root.getPath() + File.separator)
-                    && (best == null || root.getPath().length() > best.getPath().length())) best = root;
-        }
-        return best;
-    }
-
     /**
      * Exact number of files (links count as files, are never followed) and their total size.
      * Any unreadable entry aborts the walk: an incomplete count must never reach the confirmation.
@@ -645,14 +634,14 @@ public final class FolderTabContext {
         if (descriptor.getBoolean("invalid")) return null;
         String path = descriptor.getString("path");
         String prefix = descriptor.getString("prefix");
-        if (path != null) return folderPath(context, new File(path));
+        if (path != null) return LocalFolders.folderPath(context, new File(path));
         if (prefix != null) {
             // These are root-relative collections. Require exactly one existing volume candidate.
             String match = null;
-            for (File volume : roots(context)) {
+            for (File volume : LocalFolders.roots(context)) {
                 File candidate = prefix.startsWith(volume.getPath() + File.separator) ? new File(prefix)
                         : new File(volume, prefix.replaceFirst("^/+", ""));
-                String found = folderPath(context, candidate);
+                String found = LocalFolders.folderPath(context, candidate);
                 if (found == null) continue;
                 if (match != null && !match.equals(found)) return null;
                 match = found;
@@ -661,58 +650,7 @@ public final class FolderTabContext {
         }
         String name = descriptor.getString("name");
         if (name == null || name.isEmpty()) return null;
-        String match = null;
-        // This version uses parent names rather than BUCKET_ID; do not guess between same-name buckets.
-        try (Cursor cursor = context.getContentResolver().query(FILES,
-                new String[]{"_data", "relative_path", "volume_name"},
-                "bucket_display_name = ? COLLATE NOCASE", new String[]{name}, null)) {
-            if (cursor == null) return null;
-            while (cursor.moveToNext()) {
-                String data = cursor.getString(0);
-                File parent = data == null ? relativeFolder(context, cursor.getString(1), cursor.getString(2))
-                        : new File(data).getParentFile();
-                String found = parent == null ? null : folderPath(context, parent);
-                if (found == null) return null;
-                if (match != null && !match.equals(found)) return null;
-                match = found;
-            }
-        }
-        return match;
-    }
-
-    private static File relativeFolder(Context context, String relative, String volumeName) {
-        if (relative == null || volumeName == null) return null;
-        StorageManager manager = context.getSystemService(StorageManager.class);
-        for (StorageVolume volume : manager.getStorageVolumes()) {
-            if (volumeName.equals(volume.getMediaStoreVolumeName()) && volume.getDirectory() != null)
-                return new File(volume.getDirectory(), relative);
-        }
-        return null;
-    }
-
-    static List<File> roots(Context context) throws IOException {
-        List<File> roots = new ArrayList<>();
-        roots.add(Environment.getExternalStorageDirectory().getCanonicalFile());
-        StorageManager manager = context.getSystemService(StorageManager.class);
-        for (StorageVolume volume : manager.getStorageVolumes()) {
-            File directory = volume.getDirectory();
-            if (directory != null && !roots.contains(directory.getCanonicalFile())) roots.add(directory.getCanonicalFile());
-        }
-        return roots;
-    }
-
-    private static String folderPath(Context context, File folder) throws IOException {
-        return folderPath(folder, roots(context));
-    }
-
-    private static String folderPath(File folder, List<File> volumes) throws IOException {
-        if (Files.isSymbolicLink(folder.toPath()) || !folder.isDirectory()) return null;
-        File canonical = folder.getCanonicalFile();
-        for (File volume : volumes) {
-            if (canonical.equals(volume) || canonical.getPath().startsWith(volume.getPath() + File.separator))
-                return canonical.getPath();
-        }
-        return null;
+        return LocalFolders.folderOfBucketName(context, name);
     }
 
     private static boolean deletable(Context context, File folder) {
@@ -722,9 +660,9 @@ public final class FolderTabContext {
     /** 0 = may be deleted, 1 = protected folder, 2 = missing, linked, unreadable or not the same folder. */
     private static int deleteCheck(Context context, File folder) {
         try {
-            String path = folderPath(context, folder);
+            String path = LocalFolders.folderPath(context, folder);
             if (path == null || !path.equals(folder.getAbsolutePath())) return 2;
-            return protectedPath(new File(path), roots(context), true) ? 1 : 0;
+            return protectedPath(new File(path), LocalFolders.roots(context), true) ? 1 : 0;
         } catch (Throwable t) {
             DiagLog.e(AREA, "Cannot validate folder " + folder, t);
             return 2;
