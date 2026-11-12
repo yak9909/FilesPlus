@@ -4,6 +4,16 @@
 
 **再開したら、作業に入る前に必ず superpowers のスキルを Skill ツールで読み込むこと（ユーザー指示 2026-11-12。「superpowers に従っている感じがしない」との指摘）。** 最低限 `superpowers:using-superpowers` を読み、そのうえで作業に合うものを読み込んで従う（調査・設計のやり直し → `superpowers:brainstorming`／計画書 → `superpowers:writing-plans`／実装の配分 → `superpowers:subagent-driven-development`／レビュー → `superpowers:requesting-code-review`・`superpowers:receiving-code-review`／完了の判断 → `superpowers:verification-before-completion`）。「覚えているから読まなくてよい」とはしない。CLAUDE.md のユーザールールはスキルより優先。
 
+## 進行中（2026-11-12 14 時ごろ）— P8 の調査結果（DESIGN へはユーザー確認後に反映）
+- 元アプリの画面は Intent extra `activity_params`（`com.google.protobuf.contrib.android.ProtoParsers$InternalDontUse`、難読化されていない Parcelable。中身は proto のバイト列）で引数を受ける。picker は `huv{ hut{ c: kqg ルート, d: kqg の積み（ルート→今のフォルダ）, e: 表示, f: モード } }`。拡張から作れる見込み（`kqg` の各フィールドの意味は `kqg.a.n()` を使う箇所 dkc/gip/icb/ikr/iop/jdu/opz/pyx で確認中）。
+- フォルダ一覧の層（`qgc.b(Uri)` → `qhg.l`）は、file:// に加えて**端末に登録された DocumentsProvider の tree URI を受け付ける**（jadx の通常出力は `return true` が欠けて見える。fallback モードで確認）。→ SMB を元の `AdvancedBrowsingActivity` で閲覧できる可能性。未確認点: `kql` が STORAGE_LOCATION_UNKNOWN になる経路、子の問い合わせ、読み取り専用での操作メニュー。
+- 設定画面は `lna.ew()` がコードで Preference を組む（キー "ABOUT_FILES_PREF_KEY" など）。末尾に項目を差し込める見込み（Preference の API は R8 で改名 → パッチ側でバイトコードを出す）。
+- ユーザーから追加の要望 6 件（空フォルダは Download だけ／.FilesPlus のゴミ箱を元のゴミ箱で確認・復元／圧縮ファイルのカテゴリ／ローカルでもサムネイルキャッシュ／プレビューの長押しを複数選択に／SMB の入口を「すべてのストレージ」へ）。現設計との照合を提示済み。
+- ユーザーの回答（2026-11-12）: 移動先のブラウザは「元の Files の1列のファイル一覧にフォルダの考えを足したもの」にし、キューも使う（どの元画面を土台にするか確認中）。ゴミ箱は元の画面にするが、フォルダごとの削除の取り消し（全部・一部を戻す）は移動のブラウザと同じ形がよい、との提案。圧縮ファイルは (a) 案だが**ダウンロード**のカテゴリにチップを足す。サムネイルは**動画**で遅い。
+- 追加（同日）: 土台の画面＝元のカテゴリ画面（フォルダタブ付き、リスト／グリッド。メディアのカテゴリはグリッドが既定でファイル名なし）。ユーザーの新案: MiXplorer のような「切り取り・コピー → 今開いているフォルダ（ブラウザでもカテゴリのタブでも）に貼り付け」方式。採否を確認中（推奨: 採用、元の「移動」は残す）。
+- 決定（同日）: 自前のブラウザは作らない。元の内部ストレージの閲覧画面（`AdvancedBrowsingActivity`、仮名「ストレージブラウザ」）を SMB ブラウザにも使う。貼り付け先はストレージブラウザの今のフォルダ、またはメディアブラウザ（カテゴリ画面）の開いているタブ。「すべて」タブでの貼り付けは設定（既定: できない）。ストレージ⇔メディアの表示切り替えを付ける（「すべて」から切り替えたときの行き先は設定）。足りない定義は Opus が補って設計案をチャットで提示中 → 承認後 DESIGN に新しい節として書く。
+- **DESIGN 0.13 §5.12 に書いた（§5.11 を置き換え）**。builder check（Opus）の 9 問は §5.12 に反映済み。ユーザー決定: P1 と P2 は別々に出してよい／§5.10「"<タブ名>" へ移動」は削除。ユーザーが §5.12 を承認 → 計画書 `docs/plans/2026-11-12-original-screens.md`（Task 0〜10）を書いた（`unified-move-browser.md` は使わない）。**方針（ユーザー指示）: 実機での確認は使わず、静的解析だけで解明する（dex は jadx の通常＋fallback 出力、ネイティブは idalib-mcp）。** 計画書もそれに合わせて直した（Task 1 = 静的解析で引数の型紙、Task 1b = proto の読み書き）。**次の1手**: Task 0・Task 1（メインの Opus が自分で調査）。
+
 ## 最新の中断（2026-11-12 11 時ごろ、5時間枠 83%。リセット 13:50）— まずここを読む
 - **再開の予約**: 13:53 に1回だけ自動で再開する予約を立てた（`CronCreate`、起動時に superpowers スキルを読む指示つき、セッション内だけ。Claude Code を閉じると消える。`CronList` で確認）。消えていたら、ユーザーが「再開」と言ったときに下の「次の1手」から進める。
 - **体制の変更（ユーザー指示 2026-11-12）**: メイン（司令塔）とレビューは **Opus 5.5**。ワーカーは Sonnet のまま（CLAUDE.md 更新済み）。
