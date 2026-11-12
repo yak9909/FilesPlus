@@ -2,8 +2,10 @@
 
 /clear のあとに作業を再開するためのメモ。まず `CLAUDE.md`（運用ルール）と `docs/WORKERS.md`（ワーカーのセッション）を読むこと。
 
+**再開したら、作業に入る前に必ず superpowers のスキルを Skill ツールで読み込むこと（ユーザー指示 2026-11-12。「superpowers に従っている感じがしない」との指摘）。** 最低限 `superpowers:using-superpowers` を読み、そのうえで作業に合うものを読み込んで従う（調査・設計のやり直し → `superpowers:brainstorming`／計画書 → `superpowers:writing-plans`／実装の配分 → `superpowers:subagent-driven-development`／レビュー → `superpowers:requesting-code-review`・`superpowers:receiving-code-review`／完了の判断 → `superpowers:verification-before-completion`）。「覚えているから読まなくてよい」とはしない。CLAUDE.md のユーザールールはスキルより優先。
+
 ## 最新の中断（2026-11-12 11 時ごろ、5時間枠 83%。リセット 13:50）— まずここを読む
-- **再開の予約**: 13:53 に1回だけ自動で再開する予約を立てた（`CronCreate`、セッション内だけ。Claude Code を閉じると消える。`CronList` で確認）。消えていたら、ユーザーが「再開」と言ったときに下の「次の1手」から進める。
+- **再開の予約**: 13:53 に1回だけ自動で再開する予約を立てた（`CronCreate`、起動時に superpowers スキルを読む指示つき、セッション内だけ。Claude Code を閉じると消える。`CronList` で確認）。消えていたら、ユーザーが「再開」と言ったときに下の「次の1手」から進める。
 - **体制の変更（ユーザー指示 2026-11-12）**: メイン（司令塔）とレビューは **Opus 5.5**。ワーカーは Sonnet のまま（CLAUDE.md 更新済み）。
 - **最重要: UI の作り方のやり直し（DESIGN 方針 P8、§5.11 冒頭の 0.12 の注記）**。ユーザーが dev.18 を実機で見て、Mod 設定のタイトル部分と移動先ブラウザのメディア表示が元の Files と違う、「推測でデザインし、見た目を寄せて作り直している。絶対にやめて。Files の部品を完全に流用するか、リバースエンジニアリングで一切の違いなく写して」と指摘。原因: 元の View（`RowItemView` など）は Hilt の Fragment 文脈がないと例外になる（`RowItemView.h()` の `rvu` チェック）ので、自前の Activity では作れず、`FilesLook` で標準 View に差し替えて寄せていた。
   - **次の1手（リセット後、Opus のメインが自分で調査・設計）**: 元アプリ自身の画面の中で動かす方法を jadx / apktool で調べ、§5.11 の UI 部分を設計し直して DESIGN に書く。候補: (a) 移動先の指定は、元の「移動」が開くフォルダ選択画面（`advanced_browsing_picker_fragment`、§5.11.1）とフォルダタブ付きのカテゴリ画面（§5.7 のフック）をそのまま使い、データ・ボタンをフックで差し込む。(b) Mod 設定は、元の設定画面（`SettingsActivity` の Fragment）に項目として差し込む。(c) SMB の閲覧も元の一覧画面で動かせるか（§5.3 の 0.5 では provider は Files 内で開けないと判明済み → 別の入口が要る）。調査結果をもとに計画書 `docs/plans/2026-11-12-unified-move-browser.md` を改訂してから実装者（Sonnet）へ。
