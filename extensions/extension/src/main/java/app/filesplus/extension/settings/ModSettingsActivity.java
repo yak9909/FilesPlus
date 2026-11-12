@@ -17,14 +17,15 @@ import android.text.method.PasswordTransformationMethod;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
 import android.widget.ScrollView;
-import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 import app.filesplus.extension.DiagLog;
@@ -50,10 +51,14 @@ public final class ModSettingsActivity extends Activity {
     private int secondary;
     private int accent;
     private LinearLayout sections;
-    private TextView logView;
+    private SettingsLook look;
+    private SettingsLook.Row logRow;
+    private SettingsLook.Row logToggleRow;
+    private LinearLayout logBody;
+    private boolean logExpanded;
     private String deviceReport = "";
     private String decoderReport = "";
-    private Button shareButton;
+    private SettingsLook.Row shareRow;
     private AlertDialog smbDialog;
     private LinearLayout smbList;
 
@@ -74,6 +79,9 @@ public final class ModSettingsActivity extends Activity {
 
     @Override
     protected void onCreate(Bundle state) {
+        // The original settings activity runs under this theme (preference theme + list text appearances).
+        int preferencesTheme = SettingsLook.themeId(this);
+        if (preferencesTheme != 0) setTheme(preferencesTheme);
         super.onCreate(state);
         try {
             ModKit.init(this);
@@ -83,9 +91,9 @@ public final class ModSettingsActivity extends Activity {
             secondary = themeColor("textColorSecondary", android.R.attr.textColorSecondary, Color.GRAY);
             accent = themeColor("colorPrimary", android.R.attr.colorAccent, primary);
             int surface = themeColor("colorSurface", android.R.attr.colorBackground, Color.WHITE);
+            look = new SettingsLook(this, primary, secondary, accent);
 
-            LinearLayout root = new LinearLayout(this);
-            root.setOrientation(LinearLayout.VERTICAL);
+            FrameLayout root = new FrameLayout(this);
             root.setBackgroundColor(surface);
             setContentView(root);
             root.setOnApplyWindowInsetsListener((view, insets) -> {
@@ -94,19 +102,34 @@ public final class ModSettingsActivity extends Activity {
                 return insets;
             });
             root.requestApplyInsets();
-            LinearLayout toolbar = new LinearLayout(this);
-            toolbar.setGravity(Gravity.CENTER_VERTICAL);
-            Button back = new Button(this);
-            back.setText("‹");
-            back.setTextSize(28);
-            back.setContentDescription(tr("戻る", "Back"));
-            back.setOnClickListener(v -> finish());
-            toolbar.addView(back, new LinearLayout.LayoutParams(dp(56), dp(56)));
-            TextView title = text(SettingsHooks.entryTitle(this), 22, primary);
-            toolbar.addView(title, new LinearLayout.LayoutParams(0, dp(64), 1));
-            root.addView(toolbar);
+            String title = SettingsHooks.entryTitle(this);
+            FrameLayout content = null;
+            // Preferred: the original settings layout (app bar over a content frame).
+            View[] shell = look.shell(root);
+            if (shell != null) {
+                try {
+                    ViewGroup appbar = (ViewGroup) shell[1];
+                    appbar.addView(look.toolbar(title, tr("戻る", "Back"), v -> finish()), 0);
+                    root.addView(shell[0]);
+                    content = (FrameLayout) shell[2];
+                } catch (Throwable t) {
+                    DiagLog.e("settings", "Cannot use the original settings layout", t);
+                    root.removeAllViews();
+                }
+            }
+            DiagLog.i("settings", "Settings screen: theme " + (preferencesTheme != 0 ? "PreferencesTheme" : "default")
+                    + ", layout " + (content != null ? "original activity_settings_v2" : "fallback"));
+            if (content == null) {
+                // Fallback: the plain programmatic screen.
+                LinearLayout column = new LinearLayout(this);
+                column.setOrientation(LinearLayout.VERTICAL);
+                root.addView(column, new FrameLayout.LayoutParams(-1, -1));
+                column.addView(look.toolbar(title, tr("戻る", "Back"), v -> finish()));
+                content = new FrameLayout(this);
+                column.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
+            }
             ScrollView scroll = new ScrollView(this);
-            root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+            content.addView(scroll, new FrameLayout.LayoutParams(-1, -1));
             sections = new LinearLayout(this);
             sections.setOrientation(LinearLayout.VERTICAL);
             sections.setPadding(0, 0, 0, dp(24));
@@ -134,6 +157,7 @@ public final class ModSettingsActivity extends Activity {
     private void showSmbDialog(AlertDialog dialog) {
         if (smbDialog != null) smbDialog.dismiss();
         smbDialog = dialog;
+        look.styleDialog(dialog);
         dialog.show();
     }
 
@@ -147,18 +171,12 @@ public final class ModSettingsActivity extends Activity {
         header(tr("スキップ", "Skip"));
         skipRow(tr("ダブルタップのスキップ秒数", "Double-tap skip seconds"), ModSettings.SKIP_DOUBLE_TAP_SEC);
         skipRow(tr("ボタンのスキップ秒数", "Button skip seconds"), ModSettings.SKIP_BUTTON_SEC);
-        Switch toStart = new Switch(this);
-        toStart.setText(tr("先頭付近でも巻き戻す", "Rewind near the start"));
-        toStart.setTextSize(16);
-        toStart.setTextColor(primary);
-        toStart.setPadding(dp(24), dp(16), dp(24), dp(16));
-        toStart.setMinimumHeight(dp(72));
-        toStart.setChecked(ModSettings.skipRewindToStart());
-        toStart.setOnCheckedChangeListener((view, checked) ->
+        SettingsLook.Row toStart = look.switchRow(sections, tr("先頭付近でも巻き戻す", "Rewind near the start"),
+                tr("ダブルタップの巻き戻しで、戻す秒数より手前にいるときは先頭へ戻ります。",
+                        "A double-tap rewind closer to the start than the skip duration goes to the start."),
+                ModSettings.skipRewindToStart());
+        toStart.toggle.setOnCheckedChangeListener((view, checked) ->
                 safely(() -> ModSettings.putBool(ModSettings.SKIP_REWIND_TO_START, checked)));
-        sections.addView(toStart);
-        details(tr("ダブルタップの巻き戻しで、戻す秒数より手前にいるときは先頭へ戻ります。",
-                "A double-tap rewind closer to the start than the skip duration goes to the start."));
     }
 
     private void addFolderTabsSection() {
@@ -170,15 +188,8 @@ public final class ModSettingsActivity extends Activity {
     }
 
     private void folderTabsSwitch(String title, String key, boolean defaultValue) {
-        Switch toggle = new Switch(this);
-        toggle.setText(title);
-        toggle.setTextSize(16);
-        toggle.setTextColor(primary);
-        toggle.setPadding(dp(24), dp(16), dp(24), dp(16));
-        toggle.setMinimumHeight(dp(72));
-        toggle.setChecked(ModSettings.getBool(key, defaultValue));
-        toggle.setOnCheckedChangeListener((view, checked) -> safely(() -> ModSettings.putBool(key, checked)));
-        sections.addView(toggle);
+        SettingsLook.Row row = look.switchRow(sections, title, null, ModSettings.getBool(key, defaultValue));
+        row.toggle.setOnCheckedChangeListener((view, checked) -> safely(() -> ModSettings.putBool(key, checked)));
     }
 
     private void addDiagnosticsSection() {
@@ -187,24 +198,34 @@ public final class ModSettingsActivity extends Activity {
         details(deviceReport);
         TextView codecs = details(tr("動画デコーダーを確認中…", "Checking video decoders…"));
         addSmbTestRow();
-        LinearLayout actions = new LinearLayout(this);
-        actions.setPadding(dp(16), dp(8), dp(16), dp(8));
-        shareButton = new Button(this);
-        shareButton.setText(tr("テキストで共有", "Share as text"));
-        shareButton.setEnabled(false);
-        shareButton.setOnClickListener(v -> safely(this::shareDiagnostics));
-        actions.addView(shareButton, new LinearLayout.LayoutParams(0, -2, 1));
-        Button clear = new Button(this);
-        clear.setText(tr("ログを消去", "Clear log"));
-        clear.setOnClickListener(v -> safely(() -> {
+        shareRow = look.row(sections, tr("テキストで共有", "Share as text"), null);
+        shareRow.setEnabledLook(false);
+        shareRow.view.setOnClickListener(v -> safely(this::shareDiagnostics));
+        SettingsLook.Row clear = look.row(sections, tr("ログを消去", "Clear log"), null);
+        clear.view.setOnClickListener(v -> safely(() -> {
             DiagLog.clear();
             refreshLog();
         }));
-        actions.addView(clear, new LinearLayout.LayoutParams(0, -2, 1));
-        sections.addView(actions);
-        TextView logTitle = details(tr("診断ログ（新しい順）", "Diagnostic log (newest first)"));
-        logTitle.setTypeface(null, Typeface.BOLD);
-        logView = details("");
+        // The log can be long, so it stays collapsed (and last) until the row is tapped.
+        logToggleRow = look.row(sections, tr("ログ", "Log"), null);
+        logToggleRow.view.setOnClickListener(v -> safely(() -> {
+            logExpanded = !logExpanded;
+            logBody.setVisibility(logExpanded ? View.VISIBLE : View.GONE);
+            refreshLog();
+        }));
+        logBody = new LinearLayout(this);
+        logBody.setOrientation(LinearLayout.VERTICAL);
+        logBody.setVisibility(View.GONE);
+        sections.addView(logBody);
+        SettingsLook.Row copy = look.row(logBody, tr("ログをコピー", "Copy log"), null);
+        copy.view.setOnClickListener(v -> safely(() -> {
+            ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            clipboard.setPrimaryClip(ClipData.newPlainText("Diagnostic log", logReport()));
+            Toast.makeText(this, tr("コピーしました", "Copied"), Toast.LENGTH_SHORT).show();
+        }));
+        // Starts empty (so hidden); refreshLog fills it through Row.setSummary, which also makes it visible.
+        logRow = look.row(logBody, null, "");
+        logRow.summary.setTextIsSelectable(true);
         refreshLog();
         // Codec enumeration can be slow on vendor implementations; keep it off the UI thread.
         new Thread(() -> {
@@ -220,7 +241,7 @@ public final class ModSettingsActivity extends Activity {
                 if (isFinishing() || isDestroyed()) return;
                 decoderReport = result;
                 codecs.setText(result);
-                shareButton.setEnabled(true);
+                shareRow.setEnabledLook(true);
                 refreshLog();
             }));
         }, "ModKit-diagnostics").start();
@@ -237,17 +258,15 @@ public final class ModSettingsActivity extends Activity {
     private void refreshSmbList() {
         smbList.removeAllViews();
         for (SmbConnection c : SmbConnectionStore.all()) {
-            LinearLayout row = settingsRow(c.label(), smbSummary(c));
+            View row = look.row(smbList, c.label(), smbSummary(c)).view;
             row.setOnClickListener(v -> safely(() -> showSmbEditDialog(c)));
             row.setOnLongClickListener(v -> {
                 safely(() -> showSmbMenu(c));
                 return true;
             });
-            smbList.addView(row);
         }
-        LinearLayout add = settingsRow(tr("＋ 接続先を追加", "+ Add a connection"), null);
+        View add = look.row(smbList, tr("＋ 接続先を追加", "+ Add a connection"), null).view;
         add.setOnClickListener(v -> safely(() -> showSmbEditDialog(null)));
-        smbList.addView(add);
     }
 
     /** host[:port]/share[/folder] and the account; never anything secret. */
@@ -281,7 +300,7 @@ public final class ModSettingsActivity extends Activity {
         input.setText(c.displayName);
         input.selectAll();
         LinearLayout container = new LinearLayout(this);
-        container.setPadding(dp(24), dp(8), dp(24), 0);
+        container.setPadding(dp(20), dp(8), dp(20), 0);
         container.addView(input, new LinearLayout.LayoutParams(-1, -2));
         AlertDialog dialog = new AlertDialog.Builder(this).setTitle(tr("名前の変更", "Rename")).setView(container)
                 .setPositiveButton(tr("保存", "Save"), (d, which) -> safely(() -> {
@@ -310,7 +329,7 @@ public final class ModSettingsActivity extends Activity {
         SmbForm f = new SmbForm();
         LinearLayout form = new LinearLayout(this);
         form.setOrientation(LinearLayout.VERTICAL);
-        form.setPadding(dp(24), dp(8), dp(24), 0);
+        form.setPadding(dp(20), dp(8), dp(20), 0);
         int plain = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
         // Host, user and password are enough; everything else is optional and sits under the expander.
         f.host = smbField(form, tr("ホスト（例: 192.168.0.10）", "Host (e.g. 192.168.0.10)"), plain | InputType.TYPE_TEXT_VARIATION_URI);
@@ -560,33 +579,15 @@ public final class ModSettingsActivity extends Activity {
     }
 
     private void addSmbTestRow() {
-        LinearLayout row = settingsRow(tr("SMB テスト", "SMB test"),
-                tr("接続・一覧・先頭 1 KB の読み取りを確かめます", "Checks connect, listing and a 1 KB read"));
+        View row = look.row(sections, tr("SMB テスト", "SMB test"),
+                tr("接続・一覧・先頭 1 KB の読み取りを確かめます", "Checks connect, listing and a 1 KB read")).view;
         row.setOnClickListener(v -> safely(this::showSmbTestDialog));
-        sections.addView(row);
-    }
-
-    /** A tappable two-line settings row (title and optional subtitle) in the style of the skip rows. */
-    private LinearLayout settingsRow(String title, String subtitle) {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.VERTICAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(24), dp(16), dp(24), dp(16));
-        row.setMinimumHeight(dp(72));
-        TypedValue background = new TypedValue();
-        if (getTheme().resolveAttribute(android.R.attr.selectableItemBackground, background, true)) {
-            row.setBackgroundResource(background.resourceId);
-        }
-        row.addView(text(title, 16, primary));
-        if (subtitle != null && !subtitle.isEmpty()) row.addView(text(subtitle, 14, secondary));
-        row.setFocusable(true);
-        return row;
     }
 
     private void showSmbTestDialog() {
         LinearLayout form = new LinearLayout(this);
         form.setOrientation(LinearLayout.VERTICAL);
-        form.setPadding(dp(24), dp(8), dp(24), 0);
+        form.setPadding(dp(20), dp(8), dp(20), 0);
         int plain = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
         EditText host = smbField(form, tr("ホスト（例: 192.168.0.10）", "Host (e.g. 192.168.0.10)"), plain | InputType.TYPE_TEXT_VARIATION_URI);
         EditText port = smbField(form, tr("ポート", "Port"), InputType.TYPE_CLASS_NUMBER);
@@ -620,6 +621,7 @@ public final class ModSettingsActivity extends Activity {
 
     private EditText smbField(LinearLayout form, String hint, int inputType) {
         EditText field = new EditText(this);
+        field.setMinHeight(dp(48));
         field.setHint(hint);
         // setSingleLine replaces the transformation method, so it must run before setInputType and the
         // password masking is applied explicitly afterwards.
@@ -714,21 +716,8 @@ public final class ModSettingsActivity extends Activity {
     }
 
     private void skipRow(String title, String key) {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.VERTICAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(24), dp(16), dp(24), dp(16));
-        row.setMinimumHeight(dp(72));
-        TypedValue background = new TypedValue();
-        if (getTheme().resolveAttribute(android.R.attr.selectableItemBackground, background, true)) {
-            row.setBackgroundResource(background.resourceId);
-        }
-        row.addView(text(title, 16, primary));
-        TextView value = text(seconds(skipValue(key)), 14, secondary);
-        row.addView(value);
-        row.setFocusable(true);
-        row.setOnClickListener(v -> safely(() -> chooseSkip(title, key, value)));
-        sections.addView(row);
+        SettingsLook.Row row = look.row(sections, title, seconds(skipValue(key)));
+        row.view.setOnClickListener(v -> safely(() -> chooseSkip(title, key, row.summary)));
     }
 
     private int skipValue(String key) {
@@ -742,13 +731,13 @@ public final class ModSettingsActivity extends Activity {
         int selected = 3;
         for (int i = 0; i < presets.length; i++) if (presets[i] == current) selected = i;
         String[] choices = {seconds(3), seconds(5), seconds(10), tr("カスタム（1〜600秒）", "Custom (1–600 seconds)")};
-        new AlertDialog.Builder(this).setTitle(title)
+        showStyled(new AlertDialog.Builder(this).setTitle(title)
                 .setSingleChoiceItems(choices, selected, (dialog, which) -> safely(() -> {
                     dialog.dismiss();
                     if (which == 3) customSkip(title, key, value);
                     else saveSkip(key, presets[which], value);
                 }))
-                .setNegativeButton(tr("キャンセル", "Cancel"), null).show();
+                .setNegativeButton(tr("キャンセル", "Cancel"), null));
     }
 
     private void customSkip(String title, String key, TextView value) {
@@ -758,7 +747,7 @@ public final class ModSettingsActivity extends Activity {
         input.setText(String.valueOf(skipValue(key)));
         input.selectAll();
         LinearLayout container = new LinearLayout(this);
-        container.setPadding(dp(24), dp(8), dp(24), 0);
+        container.setPadding(dp(20), dp(8), dp(20), 0);
         container.addView(input, new LinearLayout.LayoutParams(-1, -2));
         AlertDialog dialog = new AlertDialog.Builder(this).setTitle(title).setView(container)
                 .setPositiveButton(tr("保存", "Save"), null)
@@ -778,6 +767,7 @@ public final class ModSettingsActivity extends Activity {
                     saveSkip(key, number, value);
                     dialog.dismiss();
                 })));
+        look.styleDialog(dialog);
         dialog.show();
     }
 
@@ -854,7 +844,13 @@ public final class ModSettingsActivity extends Activity {
     }
 
     private void refreshLog() {
-        if (logView != null) logView.setText(logReport());
+        if (logToggleRow == null) return;
+        int count = DiagLog.snapshot().size();
+        String state = logExpanded ? tr("タップで閉じる", "Tap to collapse") : tr("タップで表示", "Tap to expand");
+        logToggleRow.setSummary(tr("新しい順 · " + count + " 件 · ", "Newest first · " + count + " entries · ") + state);
+        // The text is only laid out while the log is open.
+        if (logExpanded && logRow != null) logRow.setSummary(logReport());
+        logToggleRow.view.setStateDescription(logExpanded ? tr("展開済み", "Expanded") : tr("折りたたみ", "Collapsed"));
     }
 
     private void shareDiagnostics() {
@@ -866,19 +862,27 @@ public final class ModSettingsActivity extends Activity {
     }
 
     private void header(String title) {
-        TextView header = text(title, 14, accent);
-        header.setTypeface(null, Typeface.BOLD);
-        header.setPadding(dp(24), dp(24), dp(24), dp(8));
-        header.setAccessibilityHeading(true);
-        sections.addView(header);
+        // Like the original list: a divider closes the previous section.
+        if (sections.getChildCount() > 0) look.divider(sections);
+        look.header(sections, title);
     }
 
     private TextView details(String content) {
-        TextView view = text(content, 14, secondary);
-        view.setPadding(dp(24), dp(12), dp(24), dp(12));
+        return details(sections, content);
+    }
+
+    /** A summary-only settings row holding selectable text. */
+    private TextView details(LinearLayout parent, String content) {
+        TextView view = look.row(parent, null, content).summary;
         view.setTextIsSelectable(true);
-        sections.addView(view);
         return view;
+    }
+
+    /** Applies the original dialog surface and shows the dialog. */
+    private void showStyled(AlertDialog.Builder builder) {
+        AlertDialog dialog = builder.create();
+        look.styleDialog(dialog);
+        dialog.show();
     }
 
     private TextView text(String content, int size, int color) {
