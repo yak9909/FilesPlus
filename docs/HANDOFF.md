@@ -2,15 +2,15 @@
 
 /clear のあとに作業を再開するためのメモ。まず `CLAUDE.md`（運用ルール）と `docs/WORKERS.md`（ワーカーのセッション）を読むこと。
 
-## 最新の中断（2026-11-12 午後、5時間枠 83%。リセット 13:50）— まずここを読む
-再開の予約（cron）は無い。リセット後に「再開」と言えば続きから進める。
-- **ユーザー依頼（2026-11-12）: 「移動先へ送る」を元の「移動」に統一し、移動先ブラウザをメディアビュアー風（カテゴリ → 「すべて」＋カテゴリのファイルがあるフォルダの一覧）にする。SMB でも同じビュアーを使う。デザインは Opus、進める順番は任せる。** 設計は **DESIGN §5.11**、計画書 `docs/plans/2026-11-12-unified-move-browser.md`（U0〜U6）。
-- 済み（dev にマージ・push 済み）: **U0**（`ui/FilesLook` ＋ 診断「UI 見本」）、**U1**（`browse/*` 中核、`ui/ThumbLoader`、`DestinationHistory` の Location 化）、**U2**（`BrowseActivity` 選択モード＋診断「移動先ブラウザ（テスト）」、マニフェスト登録）。どれも Opus／Sonnet のレビュー済み。実機は未確認。
-- **U3（プレビューの「移動」の乗っ取り）は worktree `ModdedFiles-wt/move`（`w/move`）に実装済み・未コミット・未レビュー**（実装者 a41f9a4f20322a77e、Sonnet）。ビルド OK（dev.18 mpp、拡張 53,907 メソッド）、全8パッチが元 APK に適用できることは確認済み（ハーネスのコピー: スクラッチパッド `u3/VerifyU3.java`）。差分は `scratchpad/u3.diff`（作り直すなら `git -C ../ModdedFiles-wt/move add -N . && git diff -U8`）。**次の1手: Opus で U3 の差分をレビュー（特に: 元の Move へのフォールバック＝`performIdentifierAction` と一回限りのバイパス、選択の読み取りタイミングとクリア、同一ボリューム・50件/100MB の判定、MoveSheet の FilesLook 経由の inflate、Activity の漏れ）→ 指摘を実装者に直させる → コミット（`feat:`）→ dev にマージ → push。** その後 U4（一覧の「移動」の乗っ取り）→ U5（SMB 閲覧モード）。
-- U2 のレビューで残した Minor: リクエスト ID 不一致で `finish()` すると `onDestroy` が別のリクエストを `cancel` しうる（`pending != null` のときだけ cancel）／読み込みに失敗した画面を回転するとエラー表示が「何もありません」になる／`goBack` が `safely()` を通らない。
-- U3 の実機確認項目（§9 #17, #20）: `performIdentifierAction(move_to_action)` で元の Move に戻れるか、MoveSheet の見た目（ライト／ダーク）、単独動画が 100MB 超のとき選んだあとで元の Move に回ること。
-- 実機で確認してほしいもの（まとめて）: 診断の「UI 見本」（元の部品が使えているか／fallback か、§9 #19）、「移動先ブラウザ（テスト）」（レイアウト、グリッド、新しいフォルダ、Android 12 で開けること）、Mod 設定の新しい見た目（ライト／ダーク、ログの開閉、回転してもスイッチが変わらないこと）。
-- 以下の「再開したらやること」の項目 1〜5（Download タブの件、SMB のカテゴリ、安全設計 S4〜S9、ツール許可ダイアログ）は引き続き有効。**Mod 設定の見た目（旧項目1）は dev にマージ済み**。
+## 最新の中断（2026-11-12 11 時ごろ、5時間枠 83%。リセット 13:50）— まずここを読む
+- **再開の予約**: 13:53 に1回だけ自動で再開する予約を立てた（`CronCreate`、セッション内だけ。Claude Code を閉じると消える。`CronList` で確認）。消えていたら、ユーザーが「再開」と言ったときに下の「次の1手」から進める。
+- **体制の変更（ユーザー指示 2026-11-12）**: メイン（司令塔）とレビューは **Opus 5.5**。ワーカーは Sonnet のまま（CLAUDE.md 更新済み）。
+- **最重要: UI の作り方のやり直し（DESIGN 方針 P8、§5.11 冒頭の 0.12 の注記）**。ユーザーが dev.18 を実機で見て、Mod 設定のタイトル部分と移動先ブラウザのメディア表示が元の Files と違う、「推測でデザインし、見た目を寄せて作り直している。絶対にやめて。Files の部品を完全に流用するか、リバースエンジニアリングで一切の違いなく写して」と指摘。原因: 元の View（`RowItemView` など）は Hilt の Fragment 文脈がないと例外になる（`RowItemView.h()` の `rvu` チェック）ので、自前の Activity では作れず、`FilesLook` で標準 View に差し替えて寄せていた。
+  - **次の1手（リセット後、Opus のメインが自分で調査・設計）**: 元アプリ自身の画面の中で動かす方法を jadx / apktool で調べ、§5.11 の UI 部分を設計し直して DESIGN に書く。候補: (a) 移動先の指定は、元の「移動」が開くフォルダ選択画面（`advanced_browsing_picker_fragment`、§5.11.1）とフォルダタブ付きのカテゴリ画面（§5.7 のフック）をそのまま使い、データ・ボタンをフックで差し込む。(b) Mod 設定は、元の設定画面（`SettingsActivity` の Fragment）に項目として差し込む。(c) SMB の閲覧も元の一覧画面で動かせるか（§5.3 の 0.5 では provider は Files 内で開けないと判明済み → 別の入口が要る）。調査結果をもとに計画書 `docs/plans/2026-11-12-unified-move-browser.md` を改訂してから実装者（Sonnet）へ。
+  - 凍結: U3（worktree `ModdedFiles-wt/move`、未コミット・未レビュー。`MoveSheet` など似せた UI に乗っている）はマージしない。ロジック部分（`MovePicker` の判定、`continueOriginal` のバイパス、`MoveQueue` の変更）は作り直しで再利用できるかもしれないので worktree は消さない。
+  - dev に入っている U0〜U2（`FilesLook`、`UiSample`、`BrowseActivity`、診断のテスト項目）と Mod 設定の見た目（`SettingsLook`）は P8 に反する。設計のやり直しの中で、置き換えるか削除するかを決める。U1 の `browse/*`（`Location`、`LocalSource`、`ThumbLoader`）と `DestinationHistory` は UI と独立なので残せる見込み。
+- **リリースの件（解決済み）**: dev.18 のリリースが失敗し続けていた（ノート ref の push が拒否 → タグだけ残り、以後「タグがすでにある」で失敗）。リモートのタグを消し、空の `fix:` コミットで再実行 → **v1.0.0-dev.18 公開済み**。Morphe Manager がずっと dev.15 のままだった件は未解決（GitHub には dev.16〜18 がある。Manager 側のキャッシュを疑い、強制更新／ソースの再追加を案内済み。結果は未確認）。**push のあとは `gh run list --workflow Release` でリリースの成否を必ず確かめる。**
+- 以下の「再開したらやること」の項目 1〜5（Download タブの件、SMB のカテゴリ、安全設計 S4〜S9、ツール許可ダイアログ）は引き続き有効。旧項目1（Mod 設定の見た目）は上のとおり P8 でやり直し。
 
 ## 現在の状況
 - プロジェクト名は **FilesPlus**（2026-11-11 に ModdedFiles から改名）。GitHub: https://github.com/yak9909/FilesPlus 。ローカルのフォルダ名は `E:/Projects/ModdedFiles` のまま（変えない）。

@@ -9,7 +9,6 @@ Talk to the user in Japanese.
 - Files is a **system app** on the device → the patched app must use a different package name.
 - Patches are applied on the phone with **Morphe Manager**; remote patch source = this GitHub repo.
 - Keep the original UI design. New UI only as items in existing menus, long-press, or on-demand bottom sheets.
-
 ## Repository / release
 - GitHub: https://github.com/yak9909/FilesPlus (public). Use `gh` for GitHub operations (account `yak9909`).
 - Work on `dev`; merge `dev` → `main` for stable (no squash). Semantic commits: `feat:` / `fix:` create releases (CI `release.yml`), `chore:` does not.
@@ -26,7 +25,7 @@ Talk to the user in Japanese.
 
 ## Workers: Claude subagents first (since 2026-11-11, user instruction)
 Roles:
-- **Main session** (the model the session runs on; currently Sonnet 5.5, advisor = Opus 5.5): coordination — design, task breakdown, dispatch, build/verify, integration. Design decisions go into `docs/DESIGN.md` (the spec; do not move it to `docs/superpowers/specs/`). Switch the main session to Opus (`/model`) only for design-heavy planning (e.g. SMB, libVLC engine abstraction), then switch back.
+- **Main session = Opus 5.5** (since 2026-11-12, user instruction): coordination — design, task breakdown, dispatch, build/verify, integration — and reviews. Design decisions go into `docs/DESIGN.md` (the spec; do not move it to `docs/superpowers/specs/`). Workers stay Sonnet (Haiku only for exact-edit chores).
 - **Workers implement. Prefer Claude subagents** (Agent tool; **always pass `model` explicitly**):
   - `haiku` (Haiku 5.5) — only when the brief can state the exact edits (renames, boilerplate, resource XML, repetitive edits). Haiku takes more turns on judgment work.
   - `sonnet` (Sonnet 5.5) — everything else (patch logic, fingerprints, smali, Android code).

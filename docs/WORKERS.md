@@ -6,7 +6,7 @@ Delete a Codex session with `codex delete --force <id>` when its context is no l
 | Session ID | Model / effort | Purpose | Status |
 |------------|----------------|---------|--------|
 | subagent a0454dddf4d7bc645 | Claude sonnet / high | `smb` Task 3 (manifest provider patch + read-only `SmbDocumentsProvider`), plan `docs/plans/2026-11-12-smb.md`, worktree `../ModdedFiles-wt/smb`, branch `w/smb` | Done. Opus-reviewed (no Critical/Important), merged into dev. Tasks 1-3 are in dev. Next: Task 4 with a fresh implementer. |
-| subagent a41f9a4f20322a77e | Claude sonnet / high | `move` U3 (preview Move takeover, "Unified Move"), plan `docs/plans/2026-11-12-unified-move-browser.md`, worktree `../ModdedFiles-wt/move`, branch `w/move` | Idle. Implemented, built, all 8 patches apply; UNCOMMITTED and NOT yet reviewed (stopped at the usage threshold). U0-U2 are merged into dev (same branch). Next: Opus review, fixes via this agent, commit, merge. |
+| subagent a41f9a4f20322a77e | Claude sonnet / high | `move` U3 (preview Move takeover, "Unified Move"), plan `docs/plans/2026-11-12-unified-move-browser.md`, worktree `../ModdedFiles-wt/move`, branch `w/move` | FROZEN (2026-11-12). Implemented, built, all 8 patches apply; UNCOMMITTED, not reviewed. Do not merge: its UI (MoveSheet etc.) violates DESIGN P8 (reuse the app's real UI). Keep the worktree; logic may be reused after the §5.11 redesign. |
 | (done) | | | `ui` (Mod settings restyle) merged into dev (0fd6ece); worktree `../ModdedFiles-wt/ui` can be removed. |
 | (none) | | | `queue` (DESIGN 5.4, tasks 1-3) finished and merged into dev (d1fc25d). Worktrees `../ModdedFiles-wt/{tabs,preview,queue}` (branches `w/tabs`, `w/preview`, `w/queue`) can be removed. No Codex sessions. |
 
