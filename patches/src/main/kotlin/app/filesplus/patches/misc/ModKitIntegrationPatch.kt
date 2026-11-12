@@ -25,6 +25,7 @@ private const val PREFERENCE = "Landroidx/preference/Preference;"
 private const val CONTEXT = "Landroid/content/Context;"
 private const val INTENT = "Landroid/content/Intent;"
 private const val SETTINGS_ACTIVITY = "app.filesplus.extension.settings.ModSettingsActivity"
+private const val BROWSE_ACTIVITY = "app.filesplus.extension.browse.BrowseActivity"
 private const val SMB_PROVIDER = "app.filesplus.extension.smb.SmbDocumentsProvider"
 private const val SMB_AUTHORITY_SUFFIX = ".smb.documents"
 private const val HOOKS ="${Constants.EXT}settings/SettingsHooks;"
@@ -46,6 +47,23 @@ private val modKitManifestPatch = resourcePatch {
             val theme = settings.getAttribute("android:theme")
             if (theme.isNotEmpty()) activity.setAttribute("android:theme", theme)
             application.appendChild(activity)
+
+            // Destination browser (unified Move). Same theme as the settings activity; the configChanges keep a
+            // rotation from recreating it (the picked-destination request lives in memory only).
+            val hasBrowser = (0 until activities.length).any {
+                (activities.item(it) as Element).getAttribute("android:name") == BROWSE_ACTIVITY
+            }
+            if (!hasBrowser) {
+                val browser = manifest.createElement("activity")
+                browser.setAttribute("android:name", BROWSE_ACTIVITY)
+                browser.setAttribute("android:exported", "false")
+                browser.setAttribute(
+                    "android:configChanges",
+                    "orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden",
+                )
+                if (theme.isNotEmpty()) browser.setAttribute("android:theme", theme)
+                application.appendChild(browser)
+            }
 
             // SMB DocumentsProvider. The authority follows the package attribute, so it stays right whether the
             // package rename ran before this patch (new package) or after it (rewritten like any other authority).

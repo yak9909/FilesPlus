@@ -268,56 +268,7 @@ final class SettingsLook {
      * row of the same height, the app's back arrow and the toolbar title text appearance.
      */
     View toolbar(CharSequence title, String backDescription, View.OnClickListener onBack) {
-        LinearLayout bar = new LinearLayout(activity);
-        bar.setGravity(Gravity.CENTER_VERTICAL);
-        int height = dp(56);
-        TypedValue size = new TypedValue();
-        int sizeAttr = res("actionBarSize", "attr");
-        if (sizeAttr != 0 && activity.getTheme().resolveAttribute(sizeAttr, size, true)) {
-            height = TypedValue.complexToDimensionPixelSize(size.data, activity.getResources().getDisplayMetrics());
-        }
-        Drawable icon = null;
-        try {
-            int id = attrResource("homeAsUpIndicator");
-            if (id == 0) id = res("abc_ic_ab_back_material", "drawable");
-            if (id != 0) icon = activity.getDrawable(id);
-        } catch (Throwable t) {
-            DiagLog.e("settings", "Cannot load the back arrow", t);
-        }
-        View back;
-        if (icon != null) {
-            ImageButton button = new ImageButton(activity);
-            button.setImageDrawable(icon);
-            back = button;
-        } else {
-            // No arrow drawable in this build: a text chevron keeps the button visible.
-            TextView chevron = plainText(32, primary);
-            chevron.setText("‹");
-            chevron.setGravity(Gravity.CENTER);
-            back = chevron;
-        }
-        TypedValue ripple = new TypedValue();
-        if (activity.getTheme().resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, ripple, true)) {
-            back.setBackgroundResource(ripple.resourceId);
-        } else {
-            back.setBackground(null);
-        }
-        back.setContentDescription(backDescription);
-        back.setOnClickListener(onBack);
-        bar.addView(back, new LinearLayout.LayoutParams(dp(56), height));
-        TextView text = new TextView(activity);
-        text.setText(title);
-        text.setSingleLine(true);
-        text.setEllipsize(TextUtils.TruncateAt.END);
-        int appearance = attrResource("textAppearanceTitleLarge");
-        if (appearance != 0) {
-            text.setTextAppearance(appearance);
-        } else {
-            text.setTextSize(22);
-            text.setTextColor(primary);
-        }
-        bar.addView(text, new LinearLayout.LayoutParams(0, height, 1));
-        return bar;
+        return FilesLook.toolbar(activity, title, backDescription, onBack, primary).view;
     }
 
     /** Inflates the original settings activity layout (app bar over a content frame), or returns null. */

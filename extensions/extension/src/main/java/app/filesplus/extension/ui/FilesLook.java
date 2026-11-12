@@ -7,8 +7,10 @@ import android.graphics.Outline;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.InsetDrawable;
+import android.text.TextUtils;
 import android.util.AttributeSet;
 import android.util.TypedValue;
+import android.view.Gravity;
 import android.view.InflateException;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -17,10 +19,12 @@ import android.view.ViewOutlineProvider;
 import android.view.Window;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
+import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.RelativeLayout;
+import android.widget.TextView;
 import app.filesplus.extension.DiagLog;
 import java.util.Collections;
 import java.util.HashSet;
@@ -152,6 +156,80 @@ public final class FilesLook {
         }
         return value.type >= TypedValue.TYPE_FIRST_COLOR_INT && value.type <= TypedValue.TYPE_LAST_COLOR_INT
                 ? value.data : fallback;
+    }
+
+    // ---- toolbar ----------------------------------------------------------------------------------------------
+
+    /** A toolbar made of plain views: the bar and its title (so a screen can change the title). */
+    public static final class Toolbar {
+        public final LinearLayout view;
+        public final TextView title;
+
+        Toolbar(LinearLayout view, TextView title) {
+            this.view = view;
+            this.title = title;
+        }
+    }
+
+    /**
+     * Stands in for the app's MaterialToolbar (an app-private class whose methods cannot be called from here): a
+     * row of the same height with the app's back arrow and the toolbar title text appearance. {@code textColor}
+     * is only used when the app's own styles cannot be found.
+     */
+    public static Toolbar toolbar(Context context, CharSequence title, String backDescription,
+            View.OnClickListener onBack, int textColor) {
+        LinearLayout bar = new LinearLayout(context);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        int height = dp(context, 56);
+        TypedValue size = new TypedValue();
+        int sizeAttr = resource(context, "actionBarSize", "attr");
+        if (sizeAttr != 0 && context.getTheme().resolveAttribute(sizeAttr, size, true)) {
+            height = TypedValue.complexToDimensionPixelSize(size.data, context.getResources().getDisplayMetrics());
+        }
+        Drawable icon = null;
+        try {
+            int id = attrResource(context, "homeAsUpIndicator");
+            if (id == 0) id = resource(context, "abc_ic_ab_back_material", "drawable");
+            if (id != 0) icon = context.getDrawable(id);
+        } catch (Throwable t) {
+            DiagLog.e("ui", "Cannot load the back arrow", t);
+        }
+        View back;
+        if (icon != null) {
+            ImageButton button = new ImageButton(context);
+            button.setImageDrawable(icon);
+            back = button;
+        } else {
+            // No arrow drawable in this build: a text chevron keeps the button visible.
+            TextView chevron = new TextView(context);
+            chevron.setTextSize(32);
+            chevron.setTextColor(textColor);
+            chevron.setText("‹");
+            chevron.setGravity(Gravity.CENTER);
+            back = chevron;
+        }
+        TypedValue ripple = new TypedValue();
+        if (context.getTheme().resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, ripple, true)) {
+            back.setBackgroundResource(ripple.resourceId);
+        } else {
+            back.setBackground(null);
+        }
+        back.setContentDescription(backDescription);
+        back.setOnClickListener(onBack);
+        bar.addView(back, new LinearLayout.LayoutParams(dp(context, 56), height));
+        TextView text = new TextView(context);
+        text.setText(title);
+        text.setSingleLine(true);
+        text.setEllipsize(TextUtils.TruncateAt.END);
+        int appearance = attrResource(context, "textAppearanceTitleLarge");
+        if (appearance != 0) {
+            text.setTextAppearance(appearance);
+        } else {
+            text.setTextSize(22);
+            text.setTextColor(textColor);
+        }
+        bar.addView(text, new LinearLayout.LayoutParams(0, height, 1));
+        return new Toolbar(bar, text);
     }
 
     // ---- dialogs ----------------------------------------------------------------------------------------------
