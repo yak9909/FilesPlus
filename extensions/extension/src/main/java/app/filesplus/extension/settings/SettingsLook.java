@@ -6,15 +6,12 @@ import android.content.Context;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
-import android.graphics.drawable.GradientDrawable;
-import android.graphics.drawable.InsetDrawable;
 import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.Window;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.CompoundButton;
 import android.widget.FrameLayout;
@@ -23,6 +20,7 @@ import android.widget.LinearLayout;
 import android.widget.Switch;
 import android.widget.TextView;
 import app.filesplus.extension.DiagLog;
+import app.filesplus.extension.ui.FilesLook;
 
 /**
  * Builds settings widgets from the host app's own resources (looked up by name, never by id) so the Mod settings
@@ -65,15 +63,7 @@ final class SettingsLook {
 
     /** The theme the original settings activity applies (preference theme and list text appearances), or 0. */
     static int themeId(Context context) {
-        return resource(context, "PreferencesTheme", "style");
-    }
-
-    static int resource(Context context, String name, String type) {
-        try {
-            return context.getResources().getIdentifier(name, type, context.getPackageName());
-        } catch (Throwable t) {
-            return 0;
-        }
+        return FilesLook.style(context, "PreferencesTheme");
     }
 
     private void logFailureOnce(String kind, String message, Throwable t) {
@@ -81,20 +71,15 @@ final class SettingsLook {
     }
 
     private int res(String name, String type) {
-        return resource(activity, name, type);
+        return FilesLook.resource(activity, name, type);
     }
 
     private int dp(int value) {
-        return Math.round(value * activity.getResources().getDisplayMetrics().density);
+        return FilesLook.dp(activity, value);
     }
 
-    /** Resolves a theme attribute (looked up by name) to its resource id, or 0. */
     private int attrResource(String attrName) {
-        int attr = res(attrName, "attr");
-        if (attr == 0) return 0;
-        TypedValue value = new TypedValue();
-        if (!activity.getTheme().resolveAttribute(attr, value, true)) return 0;
-        return value.resourceId;
+        return FilesLook.attrResource(activity, attrName);
     }
 
     private View inflate(String layoutName, ViewGroup parent) {
@@ -357,43 +342,9 @@ final class SettingsLook {
 
     // ---- dialogs ----------------------------------------------------------------------------------------------
 
-    /**
-     * The app's own platform alert dialog overlay already gives M3 buttons; the window itself would keep the
-     * framework background, so draw the Material 3 dialog surface (surface container high, 28 dp corners).
-     */
+    /** Draws the Material 3 dialog surface behind the dialog (see {@link FilesLook#styleDialog}). */
     void styleDialog(Dialog dialog) {
-        try {
-            Window window = dialog.getWindow();
-            if (window == null) return;
-            int color = themeColorByName("colorSurfaceContainerHigh", themeColorByName("colorSurface", 0));
-            if (color == 0) return;
-            GradientDrawable background = new GradientDrawable();
-            background.setColor(color);
-            background.setCornerRadius(dp(28));
-            // Same window inset the app's own dialog background uses (appcompat_dialog_background_inset).
-            int inset = dp(16);
-            int insetRes = res("appcompat_dialog_background_inset", "dimen");
-            if (insetRes != 0) inset = activity.getResources().getDimensionPixelSize(insetRes);
-            window.setBackgroundDrawable(new InsetDrawable(background, inset));
-        } catch (Throwable t) {
-            DiagLog.e("settings", "Cannot style dialog", t);
-        }
-    }
-
-    private int themeColorByName(String name, int fallback) {
-        int attr = res(name, "attr");
-        if (attr == 0) return fallback;
-        TypedValue value = new TypedValue();
-        if (!activity.getTheme().resolveAttribute(attr, value, true)) return fallback;
-        if (value.resourceId != 0) {
-            try {
-                return activity.getColorStateList(value.resourceId).getDefaultColor();
-            } catch (Throwable t) {
-                return fallback;
-            }
-        }
-        return value.type >= TypedValue.TYPE_FIRST_COLOR_INT && value.type <= TypedValue.TYPE_LAST_COLOR_INT
-                ? value.data : fallback;
+        FilesLook.styleDialog(activity, dialog);
     }
 
 }
