@@ -133,9 +133,13 @@ node_modules/
 .idea/
 local.properties
 
-### ModdedFiles
+### FilesPlus
 *.apk
 *.apkm
 *.apks
 *.xapk
 original/
+analysis/
+worker-logs/
+.superpowers/
+build/

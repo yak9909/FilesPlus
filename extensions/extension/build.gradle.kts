@@ -3,5 +3,11 @@ extension {
 }
 
 android {
-    namespace = "app.template.extension"
+    namespace = "app.filesplus.extension"
+}
+
+dependencies {
+    // SMB2/3 client (NTLM only). Kerberos/GSS classes are never loaded on Android.
+    implementation(libs.smbj)
+    implementation(libs.bcprov)
 }
