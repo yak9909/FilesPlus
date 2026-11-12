@@ -12,6 +12,7 @@ import android.system.OsConstants;
 import android.system.StructStat;
 
 import app.filesplus.extension.DiagLog;
+import app.filesplus.extension.browse.LocalFolders;
 
 import java.io.File;
 import java.io.IOException;
@@ -133,7 +134,7 @@ public final class TabMove {
                 List<String> childPaths = Collections.emptyList();
                 if (directory) {
                     File canonical = source.getCanonicalFile();
-                    if (FolderTabContext.protectedPath(canonical, FolderTabContext.roots(context), true))
+                    if (FolderTabContext.protectedPath(canonical, LocalFolders.roots(context), true))
                         throw new IOException("Protected folder cannot be moved: " + canonical);
                     // Case-insensitive on purpose: FAT / FUSE treat names that differ in case as the same.
                     String src = canonical.getPath().toLowerCase(Locale.ROOT) + File.separator;
