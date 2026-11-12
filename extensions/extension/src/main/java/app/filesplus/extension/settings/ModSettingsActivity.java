@@ -40,6 +40,7 @@ import app.filesplus.extension.smb.SmbPath;
 import app.filesplus.extension.smb.SmbSessionPool;
 import app.filesplus.extension.smb.SmbTester;
 import app.filesplus.extension.smb.SmbVfs;
+import app.filesplus.extension.ui.UiSample;
 import java.io.InputStream;
 import java.util.Collections;
 import java.util.List;
@@ -198,6 +199,12 @@ public final class ModSettingsActivity extends Activity {
         details(deviceReport);
         TextView codecs = details(tr("動画デコーダーを確認中…", "Checking video decoders…"));
         addSmbTestRow();
+        View uiSample = look.row(sections, tr("UI 見本", "UI sample"),
+                tr("元アプリの画面部品を表示して確かめます", "Shows the app's own list parts and which are used")).view;
+        uiSample.setOnClickListener(v -> safely(() -> {
+            UiSample.show(this, japanese);
+            refreshLog();
+        }));
         shareRow = look.row(sections, tr("テキストで共有", "Share as text"), null);
         shareRow.setEnabledLook(false);
         shareRow.view.setOnClickListener(v -> safely(this::shareDiagnostics));
