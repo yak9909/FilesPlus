@@ -1,3 +1,9 @@
+## [1.0.0-dev.17](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.16...v1.0.0-dev.17) (2026-11-12)
+
+### ✨ New Features
+
+* Restyle Mod settings like the original Files settings and collapse the diagnostics log ([da1eb8a](https://github.com/yak9909/FilesPlus/commit/da1eb8a14357110cd31a30fd5551a13de9f745a6))
+
 ## [1.0.0-dev.16](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.15...v1.0.0-dev.16) (2026-11-11)
 
 ### 🐛 Bug Fixes
