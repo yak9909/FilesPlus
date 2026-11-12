@@ -1,12 +1,13 @@
 # Files by Google 改造（FilesPlus）設計書
 
-- 文書バージョン: 0.8（Phase 2 の残りを簡略版で実装）
+- 文書バージョン: 0.11（「移動」の一本化と移動先ブラウザ）
 - 作成日: 2026-11-11
 
 ### 改訂履歴
 | 版 | 内容 |
 |----|------|
 | 0.1 | 初版 |
+| 0.11 | 「移動」の一本化と移動先ブラウザ（§5.11）を追加: 元アプリの「移動」の流れの調査、元アプリの画面部品の流用の可否、プレビューと一覧の「移動」を引き継いで移動キュー・履歴を使う、カテゴリ画面を手本にした `BrowseActivity`（移動先を選ぶ／SMB を見る）、ローカルと SMB の `BrowseSource`。§5.4 の「移動先へ送る…」と簡易フォルダブラウザ、§5.3 の `SmbBrowserActivity` を置き換える。§9 に #15〜#20、§10.1 に行を追加 |
 | 0.10 | ファイル操作の安全設計（§10）を追加: 脅威モデル、不変条件、SHA-256 による検証、ゴミ箱、journal と回復、OpEngine、SMB、診断、テスト、実装の順序。§4.1・§4.2・§4.3・§5.3・§5.8・§5.10・§8 の一部を §10 で置き換える（元の文は残す）。§9 に #11〜#14 を追加 |
 | 0.8 | 空のフォルダのタブ（§5.9）と現在のタブへ移動（§5.10）の最初の実装範囲を決定（JobQueue などは Phase 3 で導入）。巻き戻しオプション（§5.1）の解析結果を追記 |
 | 0.7 | 実機（OPPO A54 5G）の診断結果を反映。ハードウェアデコーダは縦横 1920 まで。2K は L1＋標準のソフトウェアデコーダで再生できた。4K は標準のソフトウェアデコーダではカクつくが、VLC はハードウェアアクセラレーション無効でも滑らか → **L2 のエンジンは libVLC**（FFmpeg＋独自 Media3 案は採らない）。順序は Phase 2 を先に行う（§5.5 の 0.7、§7） |
@@ -257,6 +258,7 @@ object SelectionStore {                         // プレビュー（§5.2）と
 - 「その他のストレージ」のタップ（`imh.a()`、文字列 "Unable to create intent from package: %s" / "Unable to start document provider activity"）: `getLaunchIntentForPackage(String)` の結果を `SmbHooks.launchIntent(Intent, String)` に通し、パッケージ名が自分のときは `SmbBrowserActivity` の明示 Intent を返す。行の表示名はアプリ名（"FilesPlus"）になる。「SMB」と出すには行のバインダ `imm.b(View, imo)`（文字列 "com.android.shell.documents" など）にフックが要る → **後回し**（表示名は当面そのまま）。
 - 画像・動画を開く: `Intent(ACTION_VIEW).setDataAndType(uri, mime).setPackage(自分).addFlags(FLAG_GRANT_READ_URI_PERMISSION)` を `gateway.preview.PreviewActivity` エイリアスに渡せる（パッチ不要、単独ファイルのみで隣のファイルへはスワイプできない）。provider が `openProxyFileDescriptor` を返せば動画のシークも効く見込み（§9 #10 は実機で要確認）。
 - 分割（0.9）: ①依存と `SmbClientFactory`＋診断画面の「SMB テスト」→ ②`SmbVfs` コアと接続先の保存（Keystore）→ ③manifest パッチと最小の `SmbDocumentsProvider` → ④タップのフックと `SmbBrowserActivity` のひな形 → ⑤ブラウザ UI → ⑥サムネイル → ⑦FileOps／移動キュー連携。
+- **0.11**: ④の `SmbBrowserActivity` と⑤のブラウザ UI は、移動先ブラウザと共通の `BrowseActivity`（見るモード）＋`SmbSource` で作る（§5.11.4・§5.11.5）。
 
 ### 5.3.1 SMB のサムネイルキャッシュ（0.5 で追加）
 **対象**: 一覧（リスト・グリッド）に出る**サムネイル**だけ。拡大表示や再生のときのデータはキャッシュしない。
@@ -349,6 +351,8 @@ class MoveQueue(jobs: JobQueue, ops: FileOps) { // §5.4・§5.10 で共通
 - **既知の穴（保留）**: 動画を再生中に送って離れた場合、複数件を送った場合、移動に失敗した場合は、移動後のファイルがプレビューを開き直すまでページ一覧に残り、そのページに切り替えると読み込みエラーになる。直し方の案: 送るときに絶対インデックス `B` を覚えておき、`modKitRemoveAt(idx)`（`C=idx`、idx<B なら `B--` してから `l()` を呼び、`C` を戻す）で外す。`B--` でページ選択コールバックが同じファイルに再度走るので、実機で動画が再始動しないか確かめる。
 - **保留**: 移動キューはフォアグラウンドサービスではなく永続化もしない（ColorOS がプロセスを止めると、待たせていたジョブは失われる。§4.3 の方針とは異なる）。自動で次へ進める挙動を設定で切る項目、上スワイプでの送信、元に戻す、クイック送り（履歴の上位3件。タスク4）は未実装。
 - 元アプリの選択画面は使わず、自前の簡易フォルダブラウザで移動先を選ぶ（設計どおり）。
+
+**0.11**: 「移動先へ送る…」と簡易フォルダブラウザは、元アプリの「移動」への一本化と移動先ブラウザ（§5.11）で置き換える。
 
 ### 5.5 解像度が大きい動画の再生（解像度を落として再生）
 **前提（技術的な制約）**: 動画は**元の解像度でデコードしてから**縮小して表示するもので、デコード前に解像度を落とすことはできない。「再生できない」原因は次のどれかで、それぞれ対策が違う。
@@ -490,6 +494,226 @@ class MoveToCurrentTabAction(
 }
 ```
 
+### 5.11 「移動」の一本化と移動先ブラウザ（0.11 で追加）
+**要件（ユーザー、2026-11-12）**
+1. プレビューの「移動先へ送る…」（§5.4）を**元アプリの「移動」に一本化する**。「移動」の項目は1つだけにし、移動キュー・履歴・ピン留めはその中で使う。
+2. 今の自前の簡易フォルダブラウザ（`FolderBrowser` / `DestinationSheet`）を、**元アプリのカテゴリ画面（画像・動画・音声などを見る画面）を手本にした画面**に置き換える。フォルダの考え方を足し、カテゴリ（画像・動画…）ごとに「すべて」と「そのカテゴリのファイルがあるフォルダ」を一覧で並べる。元アプリのデザインから外れない。部品はできるだけ元アプリのものを使う。
+3. この画面は **SMB の閲覧にも使う**（§5.3、SMB 計画のタスク 4・5）。ローカル（MediaStore / File）と SMB を同じ作りで扱えるようにする。
+
+**この節が置き換える記述**（元の節は書き換えない。食い違うときはこの節に従う）
+| 元の記述 | 置き換え |
+|---------|---------|
+| §5.4 挙動 1・2（メニューの「移動先へ送る」、「フォルダを選ぶ…」）、§5.4 の 0.9「自前の簡易フォルダブラウザで移動先を選ぶ」 | 元アプリの「移動」を引き継ぐ（§5.11.3）。移動先は移動シートと移動先ブラウザで選ぶ（§5.11.4） |
+| §5.3 方式 2「SMB ブラウザは元アプリの一覧と同じ見た目で作る」、§5.3 の分割 ④⑤、SMB 計画のタスク 4・5 の `SmbBrowserActivity` | `BrowseActivity` の閲覧モード＋`SmbSource`（§5.11.5）。「その他のストレージ」のタップのフック（タスク 4）はそのまま |
+| §4.5「移動キューとフォルダ選択画面で共通に使う」 | 移動シートと移動先ブラウザで使う。記録は `Location` の文字列（§5.11.6） |
+| §4.6「新しい画面は作らず」 | 全画面のブラウザを 1 つだけ作る（理由は §5.11.4） |
+| §4.1 `VfsProvider` | 読む側 `BrowseSource`（この節）と書く側 `Fs`（§10.11）の 2 つに分けて実現する（§5.11.5） |
+
+#### 5.11.1 調査結果: 元アプリの「移動」の流れ（versionCode 2081362。難読化名は目印だけ）
+```
+入口
+ ├ プレビュー: jju.aI(MenuItem)（"Fragment:onOptionsItemSelected"）の move_to_action 分岐
+ │    → jkt.C = jkt.B、今のページの再生を止める（jkw.f()）→ ルート一覧を読む（lrx.j()）
+ ├ 一覧（カテゴリのタブ画面ほか iwi 系）: 選択モードのメニュー ixh.n(MenuItem)、
+ │    ファイルの︙（ixy の popup_move_to。先に lmq.s([そのファイル], false) で選択に入れる）、キー操作（iwz / jwu）
+ │    → イベント iuz → iwi の受け手 → iui.a(3)
+ └ 内部ストレージの一覧（hul / htc）: move_to_action → hul.ao(3)（自分が持つルート一覧から）
+      ↓ ルート（内部・SD・USB）を読む。失敗時のログ: "Unable to load root containers"（jkj）/ "Could not get root containers."（iuh）
+ ├ ルートが 2 つ以上 → iag.e → ストレージを選ぶシート（jbz。layout folder_picker_bottom_sheet_fragment
+ │    ＋ folder_picker_list_item、題は menu_item_move_to）
+ └ 1 つ → イベント jbx(ルート kqg, モード)
+      ↓ jbx の受け手（jku case 10 など。"Unexpected picker mode!"）→ 要求 proto（hut / huv）
+      → ActivityResultLauncher で AdvancedBrowsingPickerActivity（全画面。layout advanced_browsing_picker_fragment）
+      ↓ 結果 extra "ADVANCED_BROWSING_PICKER_RESULT"（jce: 移動先 kqg、操作）→ jki（プレビュー）/ iwi.s(hur)（一覧）
+      ↓ 移動先の種類（kql）で分岐: INTERNAL → jkt.s(jmq, Z)（"Index for selected file is invalid"）、
+        SD_CARD → kyx.c（SD 用の別経路）、USB → knq.b
+```
+- モードは 3 = 移動、2 = コピー（`jcf.d = モード − 1`）。コピーも同じ流れを通る。
+- プレビューの「移動」が出るかどうかは、開いた入口ごとの設定（`ise.i`）で決まる。タブ画面の選択メニューでは常に出る。
+- **一本化の継ぎ目は 3 つ**: プレビューの `aI`、一覧の `iui.a(I)`、内部ストレージの `hul.ao(I)`。最後の picker の起動（jbx の受け手）で横取りする案は採らない: その時点では何を動かすかが分からず、結果を元アプリの proto（`jce` / `kqg`）で作り直す必要があり、脆い。
+- `iui.a(I)V` の目印: 自分のフィールドの型（コールバック）に文字列 "Could not get root containers." がある。`(I)V` はこのクラスに 1 つ。
+- 一覧の選択（`lmq`。"SELECTED_DATA_STATE_TAG"）はコルーチンで非同期に更新される。︙のポップアップは `lmq.s` の直後に `iuz` を出すので、`iui.a` の時点では選択がまだ古いことがある。**選択は「移動先を決めた時点」で読む**（元アプリも picker から戻った時点で読んでいる）。
+- 元アプリは SD への移動を別の経路（`kyx`）で行う。自前のコードで File API を使って SD に書けるかは §9 #15 で確かめる。
+
+#### 5.11.2 調査結果: 元アプリの画面部品は流用できるか
+- **元アプリの View クラス（`com.google.android.apps.nbu.files.*`）は使えない**。`RowItemView`・`SquareItemView`・`FolderPickerListItemView`・`BrowseCapsuleItemView`・`HeaderItemView`・`RoundedCornerImageView`・`SelectionIndicatorView`・`BreadcrumbView`・`NoFilesBlobView` などは、`onFinishInflate` で Hilt の peer を `smb.ay(this, …)` から取り、元アプリの fragment の Context でないと `IllegalStateException` を投げる。拡張の Activity や Dialog で inflate すると落ちる。
+- `RecyclerView` は `setAdapter(lr)` の型が難読化されている。`MaterialToolbar` の `setTitle` も名前が変わっている（`SettingsLook` で確認済み）。`BottomSheetDialog` は R8 で消えている。
+- **ライブラリの View**（`MaterialCardView`・`MaterialButton`・`Chip` / `ChipGroup`・`TextInputLayout` / `TextInputEditText`・`CircularProgressIndicator`・`BottomSheetDragHandleView`・`CoordinatorLayout`・`AppBarLayout`・`ConstraintLayout`）は、XML の属性だけで設定すれば使える。呼んでよいのはフレームワークのメソッド（`setText`・`setOnClickListener`・`setChecked` など）だけ。
+- テーマは元アプリのもの（`SettingsActivity` と同じテーマ。Mod 設定と同じ方法）を使うので、`?colorSurface` などの属性はそのまま解決できる。
+
+| 区分 | 元アプリの資源 | 使い方 |
+|------|--------------|-------|
+| (a) そのまま inflate する（中身がフレームワークとライブラリの View だけ） | `no_files_blob`（空の表示）、`new_folder_content`（新しいフォルダの入力欄）、`breadcrumb_item_text` / `breadcrumb_item_arrow`（パンくず）、`file_filter_container` / `file_filter_item`（絞り込みのチップ）、`row_item_loading_spinner`、`preference_material`（Mod 設定で使用中） | 名前で引いて inflate。id も名前で引く |
+| (b) 見た目だけ再現する（元の layout に peer つきの View が入っている） | `row_item_view`（フォルダとファイルの行）、`square_item_view`（グリッド）、`browse_capsule_item_view`（カテゴリの行）、`folder_picker_bottom_sheet_fragment` / `folder_picker_list_item`（移動シート）、`advanced_browsing_picker_fragment`（ブラウザの枠。下の `button_section` は素の `Button` なので使える）、`header_item_view`、`category_browser_v2_view` / `root_container_list_v2_fragment`（見出し） | 下の「再現の方法」 |
+| (c) 使えない | 上の peer つき View のクラスそのもの、`RecyclerView` の adapter、`MaterialToolbar` のタイトル、`BottomSheetDialog` | — |
+
+**再現の方法（区分 b）**
+1. 元の layout を、拡張の `LayoutInflater.Factory2`（`cloneInContext` した inflater に設定する）で読み、**peer つきの要素だけを素の View に差し替える**: `RowItemView` → `MaterialCardView`、`SquareItemView` → `RelativeLayout`、`BrowseCapsuleItemView` / `FolderPickerListItemView` → `LinearLayout`、`RoundedCornerImageView` → `ImageView`（角丸は `ViewOutlineProvider`。半径は `thumbnail_corner_size` / `square_view_item_corner_radius`）、`SelectionIndicatorView` → `View`（非表示）、`BreadcrumbView` → `HorizontalScrollView`、`RecyclerView` 系 → `ListView` / `GridView`、`<Button>` → `MaterialButton`（AppCompat がしている置き換えと同じ）。余白・文字のスタイル・id・背景は元の XML のまま効くので、見た目は元と同じになる。
+2. 差し替えに失敗したとき（名前がない、inflate で例外）は、同じスタイル・寸法・描画を名前で引いてコードで組む（`SettingsLook` と同じ「元の部品 → だめなら似せた部品」の二段構え）。
+3. 名前で引く主な資源: スタイル `BrowseTabGm3TitleStyle`・`CapsuleItemGm3TitleStyle`・`CapsuleItemGm3SubtitleStyle`・`BrowseCapsuleItemStyle`・`ListItemTitleText`・`ListItemSubtitleTextBlack`・`ListItemSubtitleTextDisabled`・`GridItemFileNameText`・`BottomSheetTitle`・`BottomSheetListItem`・`EmptyStateText`、寸法 `row_item_horizontal_margin`・`row_item_vertical_margin`・`row_view_icon_margin`・`advanced_browsing_list_item_image_size`・`thumbnail_corner_size`・`square_view_item_corner_radius`、描画 `capsule_item_ripple`・`primary_active_filled_circular_background`・カテゴリのアイコン（ダウンロード `quantum_gm_ic_get_app_vd_theme_24`、画像 `gs_image_vd_theme_24`、動画 `gs_movie_vd_theme_24`、音声 `quantum_gm_ic_audiotrack_vd_theme_24`、ドキュメント `gs_note_vd_theme_24`）・`gs_folder_fill1_vd_theme_24`・`quantum_gm_ic_phone_android_vd_theme_24`・`quantum_gm_ic_sd_card_vd_theme_24`・`quantum_gm_ic_star_vd_theme_24`・`ic_right_arrow`・`gs_create_new_folder_fill1_vd_theme_24`、文字列 `menu_item_move_to`・`move_here`・`all_label`・`images_label`・`videos_label`・`audio_label`・`documents_label`・`downloads`・`category_title`・`root_container_fragment_title`・`internal_storage`・`sd_card`・`new_folder_*`・`empty_state_text`・plurals `files`・`error_move_to_same_directory`。元アプリの文字列を使うので 24 言語の訳もそのまま付く。自前の文言（「ピン留め」「最近」など）だけ拡張側で日英を持つ。
+4. 共通の部品は `ui/FilesLook`（`SettingsLook` の名前引き・色・ダイアログの装飾をここへ移し、`SettingsLook` はこれを使う）。リソースは追加しない（拡張にはリソースがない。§4.6 の `mod_` リソースは使わない）。
+
+#### 5.11.3 一本化した「移動」の挙動
+**入口ごとの決定（v1）**
+| 入口 | 継ぎ目 | v1 の扱い |
+|------|-------|----------|
+| プレビューの︙ →「移動」 | `jju.aI`。既存のブリッジ（`PreviewHooks.handles(itemId)` → `onMenuItem`。true を返すと元の分岐は走らない）に `move_to_action` を足す。id は名前から引いてキャッシュ | 引き継ぐ。MediaStore id のないファイルは元のまま |
+| カテゴリのタブ画面の選択モード →「移動」 | `ixh.n` → `iuz` → `iui.a(3)` | 引き継ぐ。**`ixh.n` の `move_to_action` の分岐を通った直後の `iui.a(3)` だけ**（1 回だけ有効な印で見分ける）。選択は `ixh`（§5.10 と同じ持ち主）の選択変更のフックで取る（id と、選択を解除する `Runnable`）。id の数と項目の数が違う（MediaStore id のない項目がある）ときは元のまま |
+| タブ画面のファイルの︙ →「移動」 | `ixy` → `lmq.s` → `iuz` → `iui.a(3)` | **v1 は元のまま**（`lmq.s(…, false)` で選択モードが始まらず、選択のフックが走らないことがある → 前の選択の残りを動かしてしまう恐れ。§9 #18 で確かめてから） |
+| 検索など、ほかの iwi 系の画面、キー操作 | `iui.a(3)` | **v1 は元のまま**（印が立っていないのでフックが譲る） |
+| 内部ストレージの一覧（`hul` / `htc`） | `hul.ao(3)` | **v1 は元のまま**（選択にフォルダが入り、選択を proto で持つため調査が要る）。U6 で検討 |
+| コピー（`copy_to_action` / `popup_copy_to`） | 同じ流れ（モード 2） | **元のまま**（検証つきのコピーは §10 の S4 まで無い） |
+
+**流れ**
+1. 「移動」を押すと、履歴があれば**移動シート**、なければすぐ**移動先ブラウザ**を開く。
+2. 移動シート（`folder_picker_bottom_sheet_fragment` の見た目。ドラッグハンドル、題 `menu_item_move_to`、その下に「このファイル」/「選択中の n 件」）: ピン留め（★）→ 最近（5 件まで）→ 区切り →「フォルダを選ぶ…」。行は `folder_picker_list_item` の見た目（32dp の丸い背景のアイコン＋名前、2 行目に親のパス）。長押しでピン留めの切り替え。なくなった移動先は灰色で押せない（存在の確認は裏で行う）。
+3. 移動先が決まったら §5.11.6 の確認をして `MoveQueue` に入れる。プレビューでは §5.4 の「実装の状態」のページの規則（1 件・再生中でない → すぐ次へ。再生中の動画・音声はページを離れてから移動）をそのまま使う。一覧では選択を解除する（`ixh` の `Runnable`）。一覧は MediaStore の更新（`scanFile`）で変わる。
+4. **元の画面で続ける**: 次のときは、自前で移動せずに元アプリの移動先選択（`AdvancedBrowsingPickerActivity`）を開く。ユーザーはそこで選び直す（こちらで選んだ移動先は渡せない）。
+   - 移動先が移動元と**別のボリューム**（内部 ⇔ SD・USB）で、§10 の S4（検証つきのコピー）がまだないとき。ブラウザには「SD カードとの間の移動は元の画面で行います」と出してから開く。**ただしプレビューで複数選択（`SelectionStore`）を送るときは元の画面へ譲らない**（元アプリのプレビューの「移動」は今のファイル 1 件しか動かさないので、黙って 1 件だけ動くことになる）。「選択中のファイルを SD カードとの間で移動するのは次の版で対応します」と出し、何も移動しない。
+   - 項目数が多いとき（§5.11.6 の上限を超える）。
+   - 選択が読めない、または自前のコードで例外が起きたとき。
+   - 仕組み: 1 回だけ有効な「素通り」の印（2 秒で消える）を立ててから、元の入口をもう一度呼ぶ。プレビューは保持しているメニュー（`onMenuCreated` で受け取る `Menu`、弱参照）で `performIdentifierAction(move_to_action, 0)`。一覧はパッチで `iui` に足すインターフェース（`modKitLaunchOriginal(I)V`。印を立てて `a(I)` を呼ぶブリッジ）。フックは印を見たら何もせず元の処理を通す。
+5. 「移動先へ送る…」（§5.4 の自前の項目）はなくす。「移動」が出る条件は元アプリのまま（`ise.i`）。以前は MediaStore id があれば「移動先へ送る…」が出ていたが、元アプリが「移動」を隠す入口では出なくなる（P1 に合わせる）。
+6. §5.10「"Camera" へ移動」はそのまま残す（一本化するかは §5.11.11 の質問 4）。
+
+#### 5.11.4 移動先ブラウザ（`BrowseActivity`）
+**全画面にする理由（P1・§4.6 との関係）**: 元アプリの「移動」も全画面の `AdvancedBrowsingPickerActivity` を開くので、移動先を全画面で選ぶこと自体は元アプリと同じ操作。SMB にも §5.3 で決めたとおりブラウザの画面が要る。**この 2 つを 1 つの Activity にまとめ**、枠は元アプリの picker（`advanced_browsing_picker_fragment`: ツールバー＋パンくず＋一覧＋下のボタン欄）と同じ見た目にする。新しいデザインは作らない。
+
+- モード: **選ぶ**（移動先を選ぶ。ローカル。SMB は §10 の S9 のあと）と**見る**（SMB の閲覧。§5.3）。
+- `exported=false`、テーマは `SettingsActivity` と同じ、`configChanges` を付けて回転で作り直さない。戻るキーで 1 つ前の画面へ。最上位で戻るとキャンセル（何も移動しない）。
+- 選んだ結果は同じプロセス内の `PickRequests`（要求 id → コールバック）で返す。Intent に移動するファイルは入れない。プロセスが終わると要求は消え、何も移動しない（§9 #16）。
+
+**画面（選ぶモード）**
+```
+① 移動シート（下寄せ）            ② ブラウザの最上位
+ ────  (ドラッグハンドル)           ← 移動
+ 移動                                カテゴリ                    ← BrowseTabGm3TitleStyle
+ 選択中の 3 件                       [🖼 画像            1,234]  ← browse_capsule_item_view の見た目
+ ★ ●Camera      DCIM                [🎬 動画              210]
+ ★ ●Twitter     Pictures             [♪ 音声               88]
+   ●Memes       Download             [📄 ドキュメント       40]
+ ─────────────                       [⬇ ダウンロード        ]  ← Download フォルダの中へ（⑤）
+   ●フォルダを選ぶ…  → ②            すべてのストレージ           ← root_container_fragment_title
+                                     [📱 内部ストレージ      ]
+                                     [💾 SD カード           ]
+
+③ カテゴリ（例: 画像）              ④ フォルダ（例: Camera）／⑤ ストレージのフォルダ
+ ← 画像                              ← Camera
+ [▦] Camera        820 件            内部ストレージ › DCIM › Camera   ← パンくず（breadcrumb_item_*）
+     DCIM/Camera                     [📁] 2024                        ← 下のフォルダ（row_item_view の見た目）
+ [▦] Screenshots   300 件            [📁] 2025
+     Pictures/Screenshots            ▦ ▦ ▦ ▦                          ← このフォルダの画像（square_item_view。
+ [▦] Twitter       114 件            ▦ ▦ ▦ ▦                             選ぶモードでは押せない。⑤では
+ [📁] Wallpapers     0 件            ┌──────────────────────────┐       ファイルは灰色の行）
+     Pictures/Wallpapers（空）       │[＋ 新しいフォルダ] [ここに移動]│ ← advanced_browsing_picker_fragment の
+                                     └──────────────────────────┘          button_section（new_folder_button_title / move_here）
+```
+- ③ の 1 行 =「そのカテゴリのファイルがあるフォルダ」。MediaStore の（ボリューム、`RELATIVE_PATH`）でまとめ、件数と最新のファイル（サムネイル）を出す。並びは最新のファイルの日時が新しい順（元アプリのタブの並びは実装時に確認して合わせる）。bucket → フォルダの解決は `FolderTabContext` の方法（`BUCKET_ID` → `RELATIVE_PATH`）を共通の関数にして使う。
+- ③ には §5.9 の `KnownFolders`（そのカテゴリのファイルが一度でもあったフォルダ）も「0 件」で足す。MediaStore の bucket には空のフォルダや作ったばかりのフォルダが出ないため。それ以外の空のフォルダはストレージの木（⑤）から選ぶ。
+- **「すべて」は選ぶモードでは出さない**（フォルダではなく移動先にならない）。見るモードでは ③ の先頭に出し、そのカテゴリの全ファイルを新しい順のグリッドで出す（元アプリの「すべて」タブと同じ）。
+- ④⑤ の「新しいフォルダ」: `new_folder_content` を元アプリと同じ形のダイアログ（`SettingsLook.styleDialog` の装飾）に入れ、文言も元アプリのもの（`new_folder_title`・`new_folder_hint`・`new_folder_warning_*`）。1 階層だけ作り、既にあれば作らずに知らせる（上書きしない）。作ったらその中へ移る。
+- 出さないもの: `.` で始まるフォルダ、`Android/`、`.FilesPlus`（§10.6）。「ここに移動」を押せないとき: 書けない、すべての移動元がすでにそのフォルダにある（元アプリの plurals `error_move_to_same_directory` を出す）、移動するフォルダの中。
+- サムネイル: ローカルは `ContentResolver.loadThumbnail`（MediaStore のサムネイルの仕組み）。MediaStore にないファイルはアイコンだけ。SMB は §5.3.1 のキャッシュ。メモリ上の LRU とキャンセル（画面外へ出たら取り消す）は共通の `ThumbLoader`。
+- 速さ: カテゴリごとに MediaStore を 1 回（最小の列）読み、Java でまとめる。結果はボリュームごとに `MediaStore.getGeneration` で覚え、変わっていなければ読み直さない。UI スレッドで I/O をしない。読み込み中は元アプリの `CircularProgressIndicator` を出す。
+
+**画面（見るモード、SMB）**
+- 最上位は保存した接続先（§5.3.2）→ 共有 → フォルダ（⑤ と同じ形。ファイルも押せる）。上に `file_filter_container` のチップ（すべて / 画像 / 動画 / 音声 / ドキュメント。文言は元アプリの文字列）を出し、**今のフォルダの中だけ**を拡張子で絞る。
+- ファイルを押すと、provider の `content://` を元アプリのプレビューで開く（§5.3 の決定どおり）。選択・操作（削除など）は SMB 計画のタスク 7 で足す。
+
+#### 5.11.5 ローカルと SMB をまとめる抽象
+- §4.1 の `VfsProvider` は、**読む側の `BrowseSource`（この節）**と**書く側の `Fs`（§10.11、OpEngine が使う）**に分けて実現する。UI のための問い合わせ（カテゴリ、サムネイル、開く URI）をファイル操作の層に混ぜないため。どちらも実装はローカルと SMB の 2 つ（P7 の「2 か所以上」に当たる）。
+- 共通の値: `Location`（§4.1 の `VPath` の実体。種類 LOCAL / SMB、ルート（ボリュームのパス / 接続先 id＋共有名）、ルートからのパス）。文字列の形: ローカルは絶対パス（今の履歴と互換）、SMB は `smb://<接続先 id>/<共有名>/<パス>`。
+
+```java
+interface BrowseSource {                 // 実装: LocalSource（File＋MediaStore）, SmbSource（SmbVfs＋SmbSessionPool＋§5.3.1）
+    boolean hasMediaIndex();              // ローカル true、SMB false
+    boolean canPickDestination();         // SMB は §10 の S9 まで false
+    List<Location> roots();               // ローカル: ボリューム、SMB: 共有（または接続先の共有 1 つ）
+    List<Entry> list(Location dir, Category filterOrNull);   // フォルダの中（直下だけ）。裏のスレッドで
+    List<Bucket> buckets(Category c);     // hasMediaIndex のときだけ（③）
+    List<Entry> all(Category c, int offset, int limit);      // 同上（見るモードの「すべて」）
+    Bitmap thumbnail(Entry e, int px, CancellationSignal s);
+    Uri viewUri(Entry e);                 // プレビューに渡す URI
+    Location mkdir(Location parent, String name);            // 1 階層。既にあれば失敗（上書きしない）
+}
+// Entry: Location、名前、フォルダか、サイズ、更新日時、Category、MediaStore id（ローカルのみ、なければ 0）
+// Bucket: フォルダの Location、表示名、件数、最新の Entry
+// Category: IMAGES / VIDEOS / AUDIO / DOCUMENTS（＋ DOWNLOADS は Download フォルダへの近道）。MediaStore の条件と拡張子の表を持つ
+```
+**SMB での「カテゴリ」の扱い（MediaStore がない）**
+- カテゴリの最上位（②の「カテゴリ」）と ③ は出さない（`hasMediaIndex()` が false）。フォルダの木だけ。
+- 代わりに、今のフォルダの中だけを拡張子で絞るチップを出す（再帰しない）。
+- 「画像があるフォルダの一覧」をネットワーク越しに再帰で探すことはしない（遅く、転送量も大きい）。必要になったら、Wi-Fi 接続時だけ作る索引を別に検討する（U6 より後）。
+
+#### 5.11.6 移動キュー・履歴・安全設計（§10）との関係
+- **すべての「移動」が自前のエンジンを通るようになる**（今までは元アプリのエンジン）。そのため:
+  - 引き継ぎのタスク（U3・U4）は **§10 の S1〜S3 のあと**に行う（S3 で `TabMove` の危ない箇所を直してから）。
+  - **別のボリュームへの移動は、§10 の S4 までは「元の画面で続ける」**（§5.11.3 の 4）。S3 で別ボリュームの移動をわざと失敗にするので、SD への移動ができなくならないようにする。S4 のあとは自前で行う。
+  - SMB を移動先にするのは S9 のあと（`canPickDestination()`）。
+  - **大きな移動は S6 まで元アプリに任せる**: §10.8 は 50 件超・合計 100MB 超を前面サービスで動かすと決めているが、前面サービスと永続化は S6 まで無い（今の `MoveQueue` はメモリだけで、ColorOS に止められると途中で消える）。S6 までは、50 件以下かつ合計 100MB 以下のときだけ引き継ぎ、超えるときは「元の画面で続ける」。プレビューの複数選択で超えるときは、元の画面へ譲らずに（上の理由）件数を減らすよう知らせる。
+- 確認の段階は「なし」（§10.6。元に戻せる・検証つき）。終わったら完全なパスと件数を知らせる（今は Toast。S7 で通知と「元に戻す」）。
+- `MoveQueue` の役割は変えない（1 本のスレッド、再生中のファイルは待たせる）。一覧から来た移動も同じキューに入れる。移動先は `Location` にする（今はローカルの `File`。S6 で OpEngine のジョブにする）。
+- `DestinationHistory`: **1 件以上成功したときだけ記録する**（失敗した移動先を履歴に残さない）。文字列は `Location` の形（今の絶対パスはそのままローカルとして読む）。ピン留めが先、最近は 20 件まで（今と同じ）。
+- 新しいフォルダの作成は §10.1 の対象（1 階層、上書きしない）。SMB では `FILE_CREATE` で作り、失敗後のやり直しでは §10.9 のとおり `stat` し直して判断する。
+- 元アプリのエンジンが動くのは、内部ストレージの一覧の「移動」、コピー、「元の画面で続ける」の場合だけ。これらは今までどおり §10 の対象外。
+
+#### 5.11.7 今のコードの扱い
+| ファイル | 扱い |
+|---------|------|
+| `move/DestinationSheet.java` | 移動シート `move/MoveSheet` に置き換える。共通の小物（`Palette`、`newBottomDialog`、`track` / `dismissFor`）は `ui/` へ移す |
+| `move/FolderBrowser.java` | 削除（`browse/BrowseActivity` と画面のクラスに置き換え） |
+| `move/DestinationHistory.java` | 残す。`Location` の文字列、成功時だけ記録、存在の確認 |
+| `move/MoveQueue.java` | 残す。移動先を `Location` に。一覧からの移動も受ける |
+| `preview/PreviewHooks.java` | 「移動先へ送る…」（`MOVE_ITEM`）を消し、`move_to_action` を引き継ぐ。ページの規則（`queueMove`）は残す。メニューを弱参照で持つ（元の画面で続ける用） |
+| `preview/PagerControl`・`SelectionStore`・`SelectionTarget`・`ListHandoff` | そのまま |
+| `foldertabs/TabMove.java` | S3・S4 で置き換わるまでそのまま |
+| `foldertabs/FolderTabContext.java` | §5.10 はそのまま。bucket → フォルダの解決を共通の関数に出す |
+| `settings/SettingsLook.java` | 名前引き・色・ダイアログの装飾を `ui/FilesLook` に移して使う |
+| SMB 計画の `SmbBrowserActivity`（未作成） | 作らない。「その他のストレージ」のタップは `BrowseActivity`（見るモード）を開く |
+| パッチ `PreviewMoveQueuePatch.kt`（"Move queue in preview"） | パッチ "Unified Move" に置き換える（ページのブリッジ `modKitRemoveCurrent` / `modKitReload` / `modKitIsLastEntry` は残す） |
+
+新しいクラス（拡張）: `ui/FilesLook`（元の layout の読み込みと差し替え、名前引き）、`ui/ThumbLoader`、`browse/`（`Location`・`Entry`・`Bucket`・`Category`・`BrowseSource`・`LocalSource`・`SmbSource`・`BrowseActivity`・画面ごとのクラス・`PickRequests`）、`move/MoveSheet`・`move/MoveHooks`（smali からの入口）・`move/MovePicker`（シート → ブラウザ → 確認 → キュー）。
+
+#### 5.11.8 パッチと fingerprint
+- パッチ **"Unified Move"**（既定 ON。"Move queue in preview" の後継。`modKitIntegrationPatch`・`previewMultiSelectPatch` に依存）。
+  1. プレビュー: 新しいバイトコードは不要。`registerPager` でパッチが当たったことを拡張に知らせ（今と同じ）、`PreviewHooks.handles` が `move_to_action` を含める。
+  2. 一覧の継ぎ目: コールバックのクラスに "Could not get root containers." があるクラスを探し、その `(I)V` の先頭に `MoveHooks.onListMove(Object 起動役, View 画面の root, int モード)Z` を入れ、true なら return する。root は起動役が持つ fragment（コンストラクタの最初の引数の型）の「引数なしで View を返すメソッド」（§5.10 のパッチと同じ形の探し方）。インターフェース `OriginalMove`（`modKitLaunchOriginal(I)V`）を足す。
+  3. 選択の取得: `ixh`（`tabbed_fragment_menu_v2` を inflate するクラス）の選択変更のメソッドの後ろで `MoveHooks.onSelection(View, List, List, Runnable)` を呼ぶ。探し方は §5.10 のパッチと共通の関数（`patches/.../shared/`）にし、§5.10 のパッチを当てていなくても動くようにする。選択モードが終わったら（action mode がなくなったら）覚えた選択を捨てる。
+  4. 入口の印: 同じ `ixh` の `(MenuItem)Z`（`move_to_action` と `copy_to_action` の id を比べるメソッド）の先頭で、項目が `move_to_action` なら `MoveHooks.noteSelectionMove(View)` を呼ぶ（1 回だけ有効、2 秒で消える）。`onListMove` はこの印があるときだけ引き継ぐ。
+  5. manifest: `BrowseActivity`（`exported=false`、`SettingsActivity` と同じテーマ、`configChanges`）。
+- リソース ID は**パッチの実行時に名前から引く**（共通の関数を作る）。今のパッチにある `0x7f0f001b` などの直書きも、触るときにこれへ移す。拡張側も名前で引く（`getIdentifier`、結果はキャッシュ）。
+- どのフックも `Throwable` を捕まえ、失敗したら元アプリの「移動」に戻す（§6.2）。
+
+#### 5.11.9 実装の順序（計画書: `docs/plans/2026-11-12-unified-move-browser.md`）
+| # | 内容 | 前提 | モデル |
+|---|------|------|-------|
+| U0 | `ui/FilesLook`（元の layout の差し替え読み込み、名前引き、`SettingsLook` からの移し替え）。診断に「UI 見本」（行・カテゴリ行・グリッド・シート・ボタン欄を並べる）を足して実機で見た目を確かめる | — | sonnet |
+| U1 | `Location`・`Entry`・`Bucket`・`Category`・`BrowseSource`・`LocalSource`（MediaStore のまとめ、木、`mkdir`、サムネイル）・`ThumbLoader`。`DestinationHistory` を `Location` に | U0 | sonnet |
+| U2 | `BrowseActivity` の選ぶモード（②〜⑤、新しいフォルダ、「ここに移動」の確認）、`PickRequests`、manifest | U1 | sonnet（high） |
+| U3 | プレビューの「移動」の引き継ぎ: `MoveSheet`、`MovePicker`、`PreviewHooks`、元の画面で続ける、別ボリュームの扱い。`DestinationSheet` / `FolderBrowser` を削除。パッチ "Unified Move" | U2、§10 の S1〜S3 | sonnet |
+| U4 | 一覧の「移動」の引き継ぎ: `iui` のフック、選択の取得、`OriginalMove`、選択の解除 | U3 | sonnet（high） |
+| U5 | `SmbSource` と見るモード（SMB 計画のタスク 4 のタップのフックから開く。タスク 5 の UI はこれ）。チップの絞り込み、プレビューで開く | U2、SMB タスク 3 | sonnet |
+| U6（後） | SMB を移動先に（S9 のあと）、内部ストレージの一覧（`hul`）の「移動」、クイック送り（§5.4 タスク 4） | — | — |
+
+#### 5.11.10 リスク
+| リスク | 対策 |
+|-------|------|
+| 元の layout の差し替え読み込みが、次のバージョンの layout の変化（名前・id・スタイル）で崩れる | 名前がなければコードで組む見た目に戻す。U0 の「UI 見本」でバージョンごとに確かめる |
+| 差し替えた View では、元の独自属性（角丸など）が効かない | 必要なものだけコードで補う（角丸の outline、選択の印は使わない） |
+| 前の選択の残りを動かす（︙・検索・キー操作の入口では選択のフックが走らないことがある。§10 の T6） | v1 は選択メニューの「移動」の直後だけ引き継ぐ（入口の印）。選択モードが終わったら覚えた選択を捨てる。︙は §9 #18 で確かめてから |
+| 「元の画面で続ける」が、戻ってきたあとに効かない（プレビューのメニューは `invalidateOptionsMenu` で作り直されて弱参照が古くなる、一覧の fragment が resume していない） | 毎回 `onMenuCreated` で最新のメニューを持ち直す。効かなければ「もう一度『移動』を押してください」と出す。§9 #20 |
+| 内部ストレージの一覧とコピーは元のまま → 「移動」の画面が 2 種類になる | v1 の割り切り（§5.11.11 の質問 3）。U6 で検討 |
+| 別ボリュームの移動が、S4 までは元の画面で選び直しになる | 案内を出す。S4 で解消 |
+| 全画面のブラウザを開くとプレビューの再生が止まる（`onStop`） | 履歴から選ぶならシート（ダイアログ）だけで済み、止まらない |
+| カテゴリのまとめが大きなライブラリで遅い（数万件） | 最小の列で 1 回読む、世代番号でキャッシュ、裏のスレッド。診断に読み込み時間を出す |
+| 拡張の dex のメソッド数（今 約 52.8K、上限 65,536） | UI のコードは数千の見込み。超えるなら §5.3 の R8 の手順 |
+
+#### 5.11.11 ユーザーに確認すること
+1. 「移動」の引き継ぎは §10 の S1〜S3 のあとに出す。**別のボリューム（SD・USB）への移動は、S4 までは元アプリの移動画面で選び直してもらう**、でよいか。（既定: そうする）
+2. 「コピー」も同じシートとブラウザにするか。（既定: S4 までは元のまま）
+3. 内部ストレージの一覧（フォルダを開いて見る画面）の「移動」は、v1 では元のままでよいか。（既定: 元のまま）
+4. 選択モードには「移動」と §5.10 の「"Camera" へ移動」の 2 つが並ぶ。§5.10 の項目を残すか、移動シートの先頭の候補（今のタブのフォルダ）にまとめて項目を消すか。（既定: 残す）
+
 ---
 
 ## 6. ModKit の内部構成
@@ -558,6 +782,7 @@ patches:
 | 4 | SMB（provider・SMB ブラウザ・サムネイルキャッシュ）（§5.3） | 元アプリの一覧の見た目をどこまで流用できるか、プレビューへ `content://` を渡したときの動作 |
 | 5 | 再生エンジンの抽象化、**libVLC エンジン（L2、4K 対策）**（§5.5 の 0.7）、GIF のシーク（§5.6） | `kxj` アダプタの実装量、ネイティブライブラリの追加、32bit 版での性能 |
 | 6 | libVLC でのその他の形式、L4・L3（必要なら） | APK サイズ |
+| M | **「移動」の一本化と移動先ブラウザ（§5.11）**。U0〜U2 はいつでも、U3・U4 は S1〜S3 のあと、U5 は SMB のタスク 3 のあと | 元の layout の差し替え読み込みの見た目、一覧の選択を取るタイミング |
 | S | **ファイル操作の安全化（§10）**。S1〜S3 は次に行う（出荷済みのコードの修正）。S4〜S8 は SMB の書き込みの操作より前、S9 は SMB のタスク 7 | `rename` が上書きすること（§10.4）、MediaStore の副作用、JVM テストの導入はユーザーの承認待ち |
 
 ---
@@ -587,6 +812,12 @@ adb は使わない前提。確認は、パッチを当てたアプリの「Mod 
 | 12 | MediaStore のゴミ箱（`is_trashed=1`、元アプリと同じ方法）に入れたファイルが、元アプリのゴミ箱画面に出て戻せるか。期限は何日か（§10.6） | 未 |
 | 13 | SHA-256（`MessageDigest`、32bit のプロセス）の速さ、内部ストレージ・SD カードの読み書きの速さ（§10.5。診断の「安全確認テスト」で測る） | 未 |
 | 14 | ボリュームのルートに `.FilesPlus/`（`.nomedia` 入り）を作れるか。フォルダを rename で入れたあと、中の写真が元アプリのカテゴリやギャラリーアプリから消えるか（§10.6） | 未 |
+| 15 | 自前のコード（全ファイルアクセス権、File API / `Os.rename`）で SD カードの中の移動・フォルダの作成ができるか（元アプリは SD への移動に別の経路を使う。§5.11.1） | 未 |
+| 16 | 移動先ブラウザを開いたまま回転・ホーム・最近のアプリから消す → 何も移動せず、プレビューや一覧の状態が壊れないか（§5.11.4） | 未 |
+| 17 | プレビューの「移動」（引き継ぎ後）: 1 件の移動ですぐ次へ進む、再生中の動画はページを離れてから移動する、`B--` でページ選択がもう一度走っても動画が最初から再生し直さないか（§5.4 の既知の穴） | 未 |
+| 18 | タブ画面のファイルの︙ →「移動」で、選択モードが始まり選択のフックが走るか、移動先を決めた時点の選択がそのファイルだけか（§5.11.3。確かめるまで︙は元のまま） | 未 |
+| 19 | 診断の「UI 見本」で、移動シート・カテゴリの行・フォルダの行・グリッド・ボタン欄が元アプリと同じ見た目か（ライト・ダーク） | 未 |
+| 20 | 「元の画面で続ける」が、移動先ブラウザから戻ったあとでも効くか（プレビュー: 作り直されたメニューでの `performIdentifierAction`。一覧: resume 前の fragment からの `modKitLaunchOriginal`）（§5.11.3） | 未 |
 
 ---
 
@@ -614,6 +845,8 @@ adb は使わない前提。確認は、パッチを当てたアプリの「Mod 
 | SMB の削除・名前の変更・フォルダの作成 | 自前（UI は未接続） | `SmbVfs.delete` / `rename` / `mkdirs` | 対象 |
 | SMB の転送（アップロード・ダウンロード・移動）、provider の書き込み | 未実装（SMB タスク7。provider は読み取り専用） | — | 対象（最初からこの節の方式で作る） |
 | 元アプリの移動・コピー（`move_to_action` / `copy_to_action` → `jkt.s`）、削除（元アプリのゴミ箱）、名前の変更、フォルダの作成、安全なフォルダ、クリーン | 元アプリ | — | **対象外**。フックしないので、この節の保証もない |
+| 一本化した「移動」（0.11、§5.11。プレビュー、タブ画面の選択・︙） | 自前 | （U3・U4 で作る）`MovePicker` → `MoveQueue` | 対象。上の行の「元アプリの移動」のうち、引き継いだ入口はここに移る。内部ストレージの一覧の移動・コピー・「元の画面で続ける」は上の行のまま |
+| 移動先ブラウザの「新しいフォルダ」（0.11、`FolderBrowser.createFolder` の後継） | 自前 | （U2 で作る）`BrowseSource.mkdir` | 対象（1 階層、上書きしない） |
 
 - 元アプリのゴミ箱は、MediaStore の `is_trashed=1`（500 件ずつ。`ksm`）と、独自の索引（内部: `.FilesByGoogleTrash/.index.db`、SD: `<パッケージ>/files/.index.db`、ファイル名 `.trashed-<期限>-<名前>.trash`、30 日）で作られている（versionCode 2081362 の解析）。
 
