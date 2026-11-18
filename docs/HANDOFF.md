@@ -4,7 +4,14 @@
 
 **再開したら、作業に入る前に必ず superpowers のスキルを Skill ツールで読み込むこと（ユーザー指示 2026-11-12。「superpowers に従っている感じがしない」との指摘）。** 最低限 `superpowers:using-superpowers` を読み、そのうえで作業に合うものを読み込んで従う（調査・設計のやり直し → `superpowers:brainstorming`／計画書 → `superpowers:writing-plans`／実装の配分 → `superpowers:subagent-driven-development`／レビュー → `superpowers:requesting-code-review`・`superpowers:receiving-code-review`／完了の判断 → `superpowers:verification-before-completion`）。「覚えているから読まなくてよい」とはしない。CLAUDE.md のユーザールールはスキルより優先。
 
-## 進行中（2026-11-12 14 時ごろ）— P8 の調査結果（DESIGN へはユーザー確認後に反映）
+## 進行中（2026-11-13）— 計画 `docs/plans/2026-11-12-original-screens.md` を実行中
+- Task 0・1（P0 調査）済み: 報告 `docs/research/2026-11-12-original-screens-p0.md`、DESIGN 0.14 に反映。ユーザー決定: ゴミ箱は「FilesPlus」タブを足す形。
+- Task 1b 済み: `ui/ProtoNode`・`ui/ScreenArgs`（dev 628aeb2、chore）。レビューの Minor で残したもの: `selfTest` の dump の確認が弱い（中身の一部しか見ない）。`deviceSelfTest` は端末でしか動かない（未実行）。
+- **Task 2 済み（2026-11-18、dev 5fc32fd、chore）**。直しは Opus が再レビューして承認。**次の1手: Task 3 を codex-bridge の Codex へ**（CLAUDE.md の新しい決まり: 実装は codex-bridge、レビューは Opus 5.5）。harness の作業場所は `build/verify/work`（base.apk もそこ）。
+- （経緯）2026-11-13 利用枠 5 時間 80% で中断したときのメモ: Task 2 は実装済み・未コミット（worktree `../ModdedFiles-wt/screens`、`ui/OriginalScreens`、パッチ "Open folder stack"、`ModSettingsActivity` の診断 5 行）。ビルド OK、9 パッチすべて Applied（メインが確認）。Opus のレビュー: Critical なし、Important 1（パッチが外されたときの検査）＋ Minor 4 → 実装者が直した（未確認）。**次の1手**: 直しのビルド＋ harness を確認 → Sonnet で直した箇所だけ再レビュー（項目: `openStorage` のフックの検査、`truncatedCopies` のログ、`validateBrowser` のつながりの検査、`stackFor` の USB の扱い、`validateMedia` の 2..6）→ `chore:` でコミットして dev にマージ → Task 3。Minor で残すもの: `hsy.a` の繰り返しの途中で例外が出ると、積みが途中まで残る（元の 1 回の呼び出しが例外を出すのと同じ結果）。`truncatedCopies` は 1 段のときも毎回バイト列を読み直す（軽い）。USB OTG と SD カードを API 31 で確実に見分ける方法が無く、「USB」を含まない取り外し可能なボリュームは SD として扱う。
+- `build/verify/VerifyRewind.java` の `Set.of(...)` は古く、5 パッチしか当てていなかった（Change package name・Multi-select in preview・Move queue in preview が抜けていた）。Task 2 の実装者に全パッチを入れるよう頼んだ。harness は patches の jar ではなく `patches/build/classes/kotlin/main` をクラスパスに入れる（`-cp` は `E:/...` の形で）。
+
+## （経緯）2026-11-12 14 時ごろ — P8 の調査結果
 - 元アプリの画面は Intent extra `activity_params`（`com.google.protobuf.contrib.android.ProtoParsers$InternalDontUse`、難読化されていない Parcelable。中身は proto のバイト列）で引数を受ける。picker は `huv{ hut{ c: kqg ルート, d: kqg の積み（ルート→今のフォルダ）, e: 表示, f: モード } }`。拡張から作れる見込み（`kqg` の各フィールドの意味は `kqg.a.n()` を使う箇所 dkc/gip/icb/ikr/iop/jdu/opz/pyx で確認中）。
 - フォルダ一覧の層（`qgc.b(Uri)` → `qhg.l`）は、file:// に加えて**端末に登録された DocumentsProvider の tree URI を受け付ける**（jadx の通常出力は `return true` が欠けて見える。fallback モードで確認）。→ SMB を元の `AdvancedBrowsingActivity` で閲覧できる可能性。未確認点: `kql` が STORAGE_LOCATION_UNKNOWN になる経路、子の問い合わせ、読み取り専用での操作メニュー。
 - 設定画面は `lna.ew()` がコードで Preference を組む（キー "ABOUT_FILES_PREF_KEY" など）。末尾に項目を差し込める見込み（Preference の API は R8 で改名 → パッチ側でバイトコードを出す）。

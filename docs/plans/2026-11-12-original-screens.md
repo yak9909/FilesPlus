@@ -76,7 +76,7 @@
   - `record FolderRef(String uri, String title, int storageKind)`（`kqg` の e・表示名・h）
   - `OriginalScreens.stackFor(File folder): List<FolderRef>`（ボリュームのルートから）
 - [ ] P0 報告 §1.5 の型紙どおりにバイト列を作る（ストレージブラウザ `hus{1: hut}`、picker `huv{1: hut}`、メディアブラウザ `jcp{1: タブ名, 3: カテゴリ, 4: 1}`）。**起動の前に検査**し（読み直し、ルートの `kqg` の e・f・表示名、パスの実在）、だめなら起動せず `false` を返す（元の画面は引数が悪いと onCreate で落ちるため）。
-- [ ] 積みが 2 段以上のとき: パッチ "Open folder stack"（新規、`patches/.../screens/OpenStackPatch.kt`）で `AdvancedBrowsingActivity.onCreate` の「最初の fragment を置く」呼び出しを拡張 `OriginalScreens.placeInitialFragments(...)` に差し替え、1 段ごとに fragment を足す（P0 報告 §1.7 の案 A）。目印は難読化されていない `AdvancedBrowsingActivity` と `R.layout.advanced_browsing_activity`。差し替えが失敗したら元の 1 個だけ置く。
+- [ ] 積みが 2 段以上のとき: パッチ "Open folder stack"（新規、`patches/.../screens/OpenStackPatch.kt`）で `AdvancedBrowsingActivity.onCreate` の「最初の fragment を置く」呼び出しを、パッチが activity に足す static の `modKitPlaceInitial(peer, hut)`（中で拡張の `OriginalScreens.truncatedCopies(hut)` を呼び、元のメソッドを段の数だけ呼ぶ）に差し替え、1 段ごとに fragment を足す（P0 報告 §1.7 の案 A）。目印は難読化されていない `AdvancedBrowsingActivity` と `R.layout.advanced_browsing_activity`。差し替えが失敗したら元の 1 個だけ置く。
 - [ ] 診断に「ストレージブラウザで DCIM を開く（積み 2 段）」「メディアブラウザで画像の Camera タブを開く」「壊した引数を渡そうとする（起動せずに知らせること）」のテスト。
 - [ ] ビルドと `build/verify/`。
 

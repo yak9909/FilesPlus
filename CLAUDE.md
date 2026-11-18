@@ -23,7 +23,13 @@ Talk to the user in Japanese.
 - `analysis/tools/` — jadx, apktool.jar.
 - Obfuscated names (e.g. `kwd`, `jpx`, `kxo`, `imh`) are valid **only for versionCode 2081362**. In patches, locate code with Morphe fingerprints (strings, resource IDs, unobfuscated classes), never by obfuscated names.
 
-## Workers: Claude subagents first (since 2026-11-11, user instruction)
+## Workers: Codex via codex-bridge first (since 2026-11-18, user instruction — overrides the subagent-first rule below)
+- Implementation workers: **Codex through the `codex-bridge` MCP** (`send_task` → `get_status(wait_sec=50)` → `get_result`; read its `get_guide` once per session). Do NOT launch the Codex CLI (`scripts/codex-worker.sh`, `codex:codex-rescue`).
+- Shared folders: `E:/Projects/ModdedFiles-wt` (write — worker worktrees) and `E:/Projects/ModdedFiles` (read). Use absolute paths in prompts (the bridge's main folder is another project).
+- **Reviews: always an Opus 5.5 subagent** (Agent tool, `model: opus`), never Codex.
+- Claude Sonnet/Haiku subagents only when codex-bridge is unavailable (no lender connected or all blocked by usage).
+
+## Workers: Claude subagents (2026-11-11 rule; now the fallback)
 Roles:
 - **Main session = Opus 5.5** (since 2026-11-12, user instruction): coordination — design, task breakdown, dispatch, build/verify, integration — and reviews. Design decisions go into `docs/DESIGN.md` (the spec; do not move it to `docs/superpowers/specs/`). Workers stay Sonnet (Haiku only for exact-edit chores).
 - **Workers implement. Prefer Claude subagents** (Agent tool; **always pass `model` explicitly**):
