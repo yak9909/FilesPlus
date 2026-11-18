@@ -42,6 +42,9 @@ import app.filesplus.extension.smb.SmbPath;
 import app.filesplus.extension.smb.SmbSessionPool;
 import app.filesplus.extension.smb.SmbTester;
 import app.filesplus.extension.smb.SmbVfs;
+import app.filesplus.extension.browse.Category;
+import app.filesplus.extension.ui.OriginalScreens;
+import app.filesplus.extension.ui.ScreenArgs;
 import app.filesplus.extension.ui.UiSample;
 import java.io.InputStream;
 import java.util.Collections;
@@ -211,6 +214,7 @@ public final class ModSettingsActivity extends Activity {
                 tr("移動先を選んで、選んだ場所を表示します（何も移動しません）。移動元は DCIM/Camera として扱います",
                         "Pick a destination and show it (nothing is moved). The source counts as DCIM/Camera")).view;
         browserTest.setOnClickListener(v -> safely(this::testDestinationBrowser));
+        addOriginalScreenTests();
         shareRow = look.row(sections, tr("テキストで共有", "Share as text"), null);
         shareRow.setEnabledLook(false);
         shareRow.view.setOnClickListener(v -> safely(this::shareDiagnostics));
@@ -271,6 +275,48 @@ public final class ModSettingsActivity extends Activity {
         PickRequests.start(this, spec, picked -> {
             DiagLog.i("browse", "Test pick: " + picked);
             Toast.makeText(app, (ja ? "選んだ移動先: " : "Picked: ") + picked, Toast.LENGTH_LONG).show();
+        });
+    }
+
+    /** Temporary entries for launching the app's own screens (DESIGN 5.12; replaced by the new settings UI). */
+    private static final int REQUEST_PICK_FOLDER = 0x4f53;
+
+    private void addOriginalScreenTests() {
+        testRow(tr("DCIM をストレージブラウザで開く（2 段）", "Open DCIM in storage browser (2-level stack)"), () -> {
+            java.io.File dcim = new java.io.File(android.os.Environment.getExternalStorageDirectory(), "DCIM");
+            OriginalScreens.openStorage(this, OriginalScreens.stackFor(this, dcim), false);
+        });
+        testRow(tr("画像を Camera タブでメディアブラウザに開く", "Open Images → Camera tab in media browser"),
+                () -> OriginalScreens.openMedia(this, Category.IMAGES, "Camera", false));
+        testRow(tr("フォルダを選ぶ（選んだパスを表示）", "Pick a folder (shows the picked path in a Toast)"),
+                () -> OriginalScreens.pickFolder(this, REQUEST_PICK_FOLDER));
+        testRow(tr("壊れた引数を試す（開かず、Toast が出るはず）", "Try a broken param (must NOT launch, must toast)"), () -> {
+            boolean refused = OriginalScreens.selfTestBrokenParam(this);
+            DiagLog.i("screens", "Broken param refused: " + refused);
+            Toast.makeText(this, refused ? "PASS: refused" : "FAIL: not refused", Toast.LENGTH_LONG).show();
+        });
+        testRow("ScreenArgs.deviceSelfTest()", () -> {
+            String result = ScreenArgs.deviceSelfTest() + "\n" + ScreenArgs.selfTest();
+            DiagLog.i("screens", result);
+            Toast.makeText(this, result, Toast.LENGTH_LONG).show();
+        });
+    }
+
+    private void testRow(String title, Runnable action) {
+        look.row(sections, title, null).view.setOnClickListener(v -> safely(() -> {
+            action.run();
+            refreshLog();
+        }));
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQUEST_PICK_FOLDER) return;
+        safely(() -> {
+            String picked = resultCode == RESULT_OK ? OriginalScreens.readPicked(data) : null;
+            DiagLog.i("screens", "Picked folder: " + picked + " (result " + resultCode + ")");
+            Toast.makeText(this, tr("選んだフォルダ: ", "Picked: ") + picked, Toast.LENGTH_LONG).show();
         });
     }
 
