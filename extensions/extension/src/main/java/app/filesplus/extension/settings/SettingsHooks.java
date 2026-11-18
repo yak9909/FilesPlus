@@ -1,10 +1,9 @@
 package app.filesplus.extension.settings;
 
 import android.content.Context;
-import android.content.Intent;
 import app.filesplus.extension.DiagLog;
 
-/** SDK-only entry points used by the settings bytecode patch. */
+/** SDK-only helpers for the settings pages (the app's own settings screen opens them; see SettingsPages). */
 public final class SettingsHooks {
     private SettingsHooks() {}
 
@@ -14,33 +13,6 @@ public final class SettingsHooks {
         } catch (Throwable t) {
             DiagLog.e("settings", "Cannot read locale", t);
             return false;
-        }
-    }
-
-    public static String entryTitle(Context context) {
-        try {
-            return isJapanese(context) ? "Mod 設定" : "Mod settings";
-        } catch (Throwable t) {
-            DiagLog.e("settings", "Cannot create entry title", t);
-            return "Mod settings";
-        }
-    }
-
-    public static Intent settingsIntent(Context context) {
-        try {
-            // Explicit component stays valid when the host package is renamed.
-            return new Intent(context, ModSettingsActivity.class);
-        } catch (Throwable t) {
-            DiagLog.e("settings", "Cannot create settings intent", t);
-            return null;
-        }
-    }
-
-    public static void launchIntent(Context context, Intent intent) {
-        try {
-            if (intent != null) context.startActivity(intent);
-        } catch (Throwable t) {
-            DiagLog.e("settings", "Cannot open settings", t);
         }
     }
 }
