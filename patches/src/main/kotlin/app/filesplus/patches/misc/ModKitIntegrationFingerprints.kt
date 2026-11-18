@@ -8,8 +8,3 @@ internal object FilesApplicationOnCreateFingerprint : Fingerprint(
     parameters = emptyList(),
     returnType = "V",
 )
-
-internal object SettingsBuilderFingerprint : Fingerprint(
-    returnType = "V",
-    strings = listOf("ABOUT_FILES_PREF_KEY", "THEME_CHANGE_PREF_KEY"),
-)

@@ -16,7 +16,6 @@ import java.util.List;
 
 import app.filesplus.extension.DiagLog;
 import app.filesplus.extension.ModKit;
-import app.filesplus.extension.move.DestinationSheet;
 import app.filesplus.extension.move.MoveQueue;
 
 /**
@@ -133,9 +132,6 @@ public final class ListHandoff implements Application.ActivityLifecycleCallbacks
 
     @Override
     public void onActivityDestroyed(Activity activity) {
-        try {
-            DestinationSheet.dismissFor(activity);
-        } catch (Throwable t) { PreviewHooks.hookError(t); }
         try {
             // Anything not handed over by the time the preview closes (e.g. it was opened from outside) is dropped.
             // Only the instance we last saw counts: an older preview going away must not clear a newer one's picks.

@@ -49,7 +49,6 @@ public final class FolderTabContext {
     private static final String AREA = "foldertabs";
     private static final int TAG = 0x7e464354;
     private static final int DELETE_ITEM = 0x7e464344;
-    private static final int MOVE_ITEM = 0x7e464d56;
     private static final Uri FILES = MediaStore.Files.getContentUri("external");
     private static final ExecutorService WORKER = Executors.newSingleThreadExecutor();
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
@@ -66,8 +65,7 @@ public final class FolderTabContext {
     private final Map<String, String> folders = new HashMap<>();
     private final Set<String> resolving = new HashSet<>();
     private WeakReference<Menu> menu = new WeakReference<>(null);
-    // Selection-mode (action mode) menu state for "move to current tab".
-    private WeakReference<Menu> selectionMenu = new WeakReference<>(null);
+    // Selection capture retained for clipboard consumers.
     private WeakReference<Runnable> clearSelection = new WeakReference<>(null);
     private long[] selectedIds = new long[0];
     private List<String> selectedPaths = Collections.emptyList();
@@ -349,33 +347,41 @@ public final class FolderTabContext {
         } catch (Throwable t) { hookError(t); }
     }
 
-    /**
-     * Called by the bridge after every selection change while the selection action mode exists.
-     * The lists hold MediaStore ids (Long) and app-private entries that are ignored here.
-     */
-    public static void onSelectionMenu(View root, Menu menu, List<?> first, List<?> second, Runnable clear) {
+    /** Called after every native selection change, including when the selection becomes empty. */
+    public static void captureSelection(View root, List<?> first, List<?> second, Runnable clear) {
         try {
-            if (root == null || menu == null) return;
-            Object tag = root.getTag(TAG);
-            if (!(tag instanceof FolderTabContext)) return;
-            ((FolderTabContext) tag).selectionChanged(menu, first, second, clear);
+            FolderTabContext tabs = from(root);
+            if (tabs != null) tabs.selectionChanged(first, second, clear);
         } catch (Throwable t) { hookError(t); }
     }
 
-    private void selectionChanged(Menu target, List<?> first, List<?> second, Runnable clear) {
+    public static FolderTabContext from(View root) {
+        try {
+            Object tag = root == null ? null : root.getTag(TAG);
+            return tag instanceof FolderTabContext ? (FolderTabContext) tag : null;
+        } catch (Throwable t) { hookError(t); return null; }
+    }
+
+    public long[] selectedIds() {
+        try { return selectedIds.clone(); } catch (Throwable t) { hookError(t); return new long[0]; }
+    }
+
+    public List<String> selectedPaths() {
+        try { return new ArrayList<>(selectedPaths); }
+        catch (Throwable t) { hookError(t); return Collections.emptyList(); }
+    }
+
+    public void clearSelection() {
+        try {
+            Runnable callback = clearSelection.get();
+            if (callback != null) callback.run();
+        } catch (Throwable t) { hookError(t); }
+    }
+
+    private void selectionChanged(List<?> first, List<?> second, Runnable clear) {
         View view = root.get();
         if (view == null) return;
-        selectionMenu = new WeakReference<>(target);
         clearSelection = new WeakReference<>(clear);
-        if (target.findItem(MOVE_ITEM) == null) {
-            MenuItem item = target.add(Menu.NONE, MOVE_ITEM, Menu.NONE, "");
-            item.setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
-            item.setVisible(false);
-            item.setOnMenuItemClickListener(clicked -> {
-                try { moveSelection(); } catch (Throwable t) { busy = false; hookError(t); updateMenu(); }
-                return true;
-            });
-        }
         Set<Long> unique = new java.util.TreeSet<>();
         for (List<?> list : Arrays.asList(first, second)) {
             if (list == null) continue;
@@ -386,6 +392,7 @@ public final class FolderTabContext {
         for (long id : unique) ids[index++] = id;
         if (!Arrays.equals(ids, selectedIds)) {
             selectedIds = ids;
+            selectedPaths = Collections.emptyList();
             final int epoch = ++selectionEpoch;
             final Context app = view.getContext().getApplicationContext();
             if (ids.length == 0) {
@@ -412,79 +419,7 @@ public final class FolderTabContext {
         updateMenu();
     }
 
-    /** Number of selected files that are not yet directly inside the current tab's folder. */
-    private int movable() {
-        if (currentFolder == null) return 0;
-        int count = 0;
-        for (String path : selectedPaths) {
-            File parent = new File(path).getParentFile();
-            if (parent == null || !parent.getPath().equals(currentFolder)) count++;
-        }
-        return count;
-    }
-
-    private void updateMoveItem() {
-        Menu target = selectionMenu.get();
-        View view = root.get();
-        if (target == null || view == null) return;
-        MenuItem item = target.findItem(MOVE_ITEM);
-        if (item == null) return;
-        boolean available = !busy && movable() > 0;
-        if (currentFolder != null) {
-            String name = new File(currentFolder).getName();
-            item.setTitle(japanese(view.getContext()) ? "\"" + name + "\" へ移動" : "Move to \"" + name + "\"");
-        }
-        item.setVisible(available);
-        item.setEnabled(available);
-    }
-
-    private void moveSelection() {
-        View view = root.get();
-        if (view == null || busy || currentFolder == null) return;
-        final Context app = view.getContext().getApplicationContext();
-        final File destination = new File(currentFolder);
-        final List<String> sources = new ArrayList<>(selectedPaths);
-        final Runnable clear = clearSelection.get();
-        busy = true;
-        updateMenu();
-        // File-changing work shares one thread with the move queue, so two moves never run at once.
-        TabMove.fileExecutor().execute(() -> {
-            TabMove.Result result = new TabMove.Result();
-            try {
-                result = TabMove.move(app, sources, destination);
-            } catch (Throwable t) {
-                result.failed = sources.size();
-                DiagLog.e(AREA, "Move to " + destination + " failed", t);
-            }
-            final TabMove.Result done = result;
-            MAIN.post(() -> {
-                try {
-                    busy = false;
-                    selectedPaths = Collections.emptyList();
-                    selectedIds = new long[0];
-                    selectionEpoch++;
-                    if (clear != null) clear.run();
-                    toast(app, moveReport(app, destination.getName(), done));
-                    refresh();
-                } catch (Throwable t) { hookError(t); }
-            });
-        });
-    }
-
-    private static String moveReport(Context context, String tab, TabMove.Result result) {
-        boolean ja = japanese(context);
-        StringBuilder text = new StringBuilder(ja
-                ? result.moved + " 件を \"" + tab + "\" に移動しました"
-                : "Moved " + result.moved + " item" + (result.moved == 1 ? "" : "s") + " to \"" + tab + "\"");
-        if (result.failed > 0) text.append(ja ? "（失敗 " + result.failed + " 件）" : " (" + result.failed + " failed)");
-        if (result.skipped > 0) text.append(ja ? "（移動済み " + result.skipped + " 件を除く）"
-                : " (" + result.skipped + " already there)");
-        if (result.crossVolume > 0) text.append('\n').append(TabMove.crossVolumeNote(ja));
-        return text.toString();
-    }
-
     private void updateMenu() {
-        updateMoveItem();
         Menu target = menu.get();
         View view = root.get();
         if (target == null || view == null) return;

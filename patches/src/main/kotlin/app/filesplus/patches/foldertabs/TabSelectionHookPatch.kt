@@ -24,11 +24,8 @@ private fun Method.string(text: String) = code().any { (it.ref() as? StringRefer
 private fun Method.literal(value: Long) = code().any { (it as? WideLiteralInstruction)?.wideLiteral == value }
 private fun Method.calls() = code().mapNotNull { it.ref() as? MethodReference }
 
-val moveToCurrentTabPatch = bytecodePatch(
-    name = "Move to current tab",
-    description = "Add a selection-mode menu item that moves the selected files into the folder of the current category tab.",
-    default = true,
-) {
+/** Hidden capture hook for clipboard consumers; it adds no menu item. */
+internal val tabSelectionHookPatch = bytecodePatch {
     compatibleWith(Constants.COMPATIBILITY_FILES)
     dependsOn(modKitIntegrationPatch, folderTabContextPatch)
 
@@ -45,11 +42,6 @@ val moveToCurrentTabPatch = bytecodePatch(
         val actionModes = classDefBy { cls -> cls.methods.any {
             it.string("setActionModeTitle should be called when action exists")
         } }
-        val getMenu = actionModes.methods.single { it.string("updateMenuItem should be called when action exists") }
-            .calls().first { it.returnType == MENU && it.parameterTypes.isEmpty() }
-        val actionMode = actionModes.fields.single { it.type == getMenu.definingClass }
-        val actionModesField = owner.fields.single { it.type == actionModes.type }
-
         // Selection model owner, found through its saved-state key, and its "clear selection" method.
         val selectionField = owner.fields.single { field ->
             classDefByOrNull(field.type)?.methods?.any { it.string("SELECTED_DATA_STATE_TAG") } == true
@@ -79,12 +71,7 @@ val moveToCurrentTabPatch = bytecodePatch(
             invoke-virtual {v0}, $clearSelection
         """.trimIndent())
 
-        val menuBridge: MutableMethod = owner.bridge("modKitMoveSelection", listOf(selectionType), 8, """
-            iget-object v0, p0, $actionModesField
-            iget-object v0, v0, $actionMode
-            if-eqz v0, :done
-            invoke-virtual {v0}, $getMenu
-            move-result-object v1
+        val menuBridge: MutableMethod = owner.bridge("modKitCaptureSelection", listOf(selectionType), 8, """
             iget-object v2, p0, $fragment
             invoke-virtual {v2}, $rootView
             move-result-object v2
@@ -94,8 +81,7 @@ val moveToCurrentTabPatch = bytecodePatch(
             move-result-object v4
             invoke-interface {v3}, ${accessors[1]}
             move-result-object v5
-            invoke-static {v2, v1, v4, v5, p0}, $HOOK->onSelectionMenu(${VIEW}${MENU}${LIST}${LIST}${RUNNABLE})V
-            :done
+            invoke-static {v2, v4, v5, p0}, $HOOK->captureSelection(${VIEW}${LIST}${LIST}${RUNNABLE})V
         """.trimIndent())
         owner.afterOriginal(onSelection, "invoke-virtual {p0, p1}, $menuBridge")
     }
