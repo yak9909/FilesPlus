@@ -23,7 +23,9 @@ Talk to the user in Japanese.
 - `analysis/tools/` — jadx, apktool.jar.
 - Obfuscated names (e.g. `kwd`, `jpx`, `kxo`, `imh`) are valid **only for versionCode 2081362**. In patches, locate code with Morphe fingerprints (strings, resource IDs, unobfuscated classes), never by obfuscated names.
 
-## Workers: Codex via codex-bridge first (since 2026-11-18, user instruction — overrides the subagent-first rule below)
+## Current rule (2026-11-19, user instruction): Claude models only — do NOT use Codex (neither codex-bridge nor the CLI) until the user says otherwise. Workers = Claude subagents per "Workers: Claude subagents" below; reviews = Opus 5.5.
+
+## Workers: Codex via codex-bridge (2026-11-18 rule; SUSPENDED by the rule above)
 - Implementation workers: **Codex through the `codex-bridge` MCP** (`send_task` → `get_status(wait_sec=50)` → `get_result`; read its `get_guide` once per session). Do NOT launch the Codex CLI (`scripts/codex-worker.sh`, `codex:codex-rescue`).
 - Shared folders: `E:/Projects/ModdedFiles-wt` (write — worker worktrees) and `E:/Projects/ModdedFiles` (read). Use absolute paths in prompts (the bridge's main folder is another project).
 - **Reviews: always an Opus 5.5 subagent** (Agent tool, `model: opus`), never Codex.
