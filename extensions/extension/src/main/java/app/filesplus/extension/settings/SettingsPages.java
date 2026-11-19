@@ -24,6 +24,9 @@ import app.filesplus.extension.DiagLog;
 import app.filesplus.extension.ModKit;
 import app.filesplus.extension.ModSettings;
 import app.filesplus.extension.browse.Category;
+import app.filesplus.extension.clip.PasteSelfTest;
+import app.filesplus.extension.clip.Clipboard;
+import app.filesplus.extension.clip.InterruptedPastes;
 import app.filesplus.extension.smb.*;
 import app.filesplus.extension.ui.OriginalScreens;
 import app.filesplus.extension.ui.ScreenArgs;
@@ -366,6 +369,34 @@ public final class SettingsPages {
                 tr("接続・一覧・先頭 1 KB の読み取りを確かめます", "Checks connect, listing and a 1 KB read"),
                 () -> activity.startActivity(intent(activity, "smb").putExtra("filesplus_smb_test", true)));
         addOriginalScreenTests();
+        row(screen, tr("貼り付けの判定テスト", "Paste rules test"),
+                tr("一時フォルダで、クリップボードと貼り付けの規則を確かめます",
+                        "Checks the clipboard and the paste rules in a temporary folder"),
+                this::runPasteTest);
+        Context app = activity.getApplicationContext();
+        List<Clipboard.Interrupted> interrupted = Clipboard.interrupted(app);
+        if (!interrupted.isEmpty()) {
+            row(screen, tr("貼り付けの中断記録", "Interrupted pastes"),
+                    InterruptedPastes.summary(interrupted, japanese), () -> {
+                        new Thread(() -> {
+                            String result;
+                            try { result = InterruptedPastes.report(Clipboard.interrupted(app), japanese); }
+                            catch (Throwable t) {
+                                hookError(t);
+                                result = tr("中断記録を取得できません。", "Interrupted paste records unavailable.");
+                            }
+                            String text = result;
+                            activity.runOnUiThread(() -> safely(() -> {
+                                if (activity.isFinishing() || activity.isDestroyed()) return;
+                                report(tr("貼り付けの中断記録", "Interrupted pastes"), text, true);
+                            }));
+                        }, "ModKit-interrupted-pastes").start();
+                    });
+            row(screen, tr("中断記録を消す", "Dismiss"), null, () -> {
+                Clipboard.dismissInterrupted(app);
+                activity.getWindow().getDecorView().post(activity::recreate);
+            });
+        }
         row(screen, tr("テキストで共有", "Share as text"), null, () ->
                 share(pageTitle(), deviceReport + "\n\n" + decoderReport + "\n\n" + logReport()));
         row(screen, tr("ログを消去", "Clear log"), null, DiagLog::clear);
@@ -383,6 +414,23 @@ public final class SettingsPages {
                 bridge.setSummary(codecs, text);
             }));
         }, "ModKit-diagnostics").start();
+    }
+
+    /** Runs the clipboard / paste rules self test off the UI thread and shows the PASS / FAIL lines in a dialog. */
+    private void runPasteTest() {
+        toast(tr("テスト中…", "Testing…"));
+        Context app = activity.getApplicationContext();
+        new Thread(() -> {
+            String result;
+            try { result = PasteSelfTest.runDevice(app); }
+            catch (Throwable t) { hookError(t); result = "FAIL unexpected exception: " + t; }
+            String text = result;
+            DiagLog.i("clip", "Paste rules test:\n" + text);
+            activity.runOnUiThread(() -> safely(() -> {
+                if (activity.isFinishing() || activity.isDestroyed()) return;
+                report(tr("貼り付けの判定テスト", "Paste rules test"), text, true);
+            }));
+        }, "ModKit-paste-test").start();
     }
 
     private void addOriginalScreenTests() {

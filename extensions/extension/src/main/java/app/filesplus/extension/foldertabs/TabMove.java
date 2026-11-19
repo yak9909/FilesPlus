@@ -115,6 +115,23 @@ public final class TabMove {
      * on {@link #fileExecutor()} only.
      */
     public static Result move(Context context, List<String> sources, File destination) {
+        return move(context, sources, destination, null);
+    }
+
+    /**
+     * {@link #reserved(File)} runs before attempting to create the placeholder, so the listener can persist
+     * the name first. {@link #done(File)} runs after the rename or whenever that candidate is abandoned,
+     * including a taken name or a failed reservation. A recorded name may never have been created.
+     */
+    public interface ReservationListener {
+        void reserved(File target);
+
+        void done(File target);
+    }
+
+    /** Same as {@link #move(Context, List, File)}, reporting every reserved name to {@code listener} (may be null). */
+    public static Result move(Context context, List<String> sources, File destination,
+                              ReservationListener listener) {
         Result result = new Result();
         List<String> oldPaths = new ArrayList<>();
         List<String> newPaths = new ArrayList<>();
@@ -143,7 +160,7 @@ public final class TabMove {
                     // Read before the move: these are the paths whose MediaStore rows become stale.
                     childPaths = FolderTrash.mediaPaths(context, source);
                 }
-                File target = transfer(source, destination, directory);
+                File target = transfer(source, destination, directory, listener);
                 result.moved++;
                 oldPaths.add(source.getPath());
                 newPaths.add(target.getPath());
@@ -190,46 +207,64 @@ public final class TabMove {
      * silently, so it is only ever called on a name that this call just created itself (zero-byte file or empty
      * folder). Throws {@link CrossVolumeException} on EXDEV with the source untouched.
      */
-    private static File transfer(File source, File destination, boolean directory) throws IOException {
+    private static File transfer(File source, File destination, boolean directory, ReservationListener listener)
+            throws IOException {
         String name = source.getName();
         int dot = directory ? -1 : name.lastIndexOf('.');
         String base = dot > 0 ? name.substring(0, dot) : name;
         String extension = dot > 0 ? name.substring(dot) : "";
         for (int n = 0; n < MAX_NAME_ATTEMPTS; n++) {
             File target = new File(destination, n == 0 ? name : base + " (" + n + ")" + extension);
-            Reservation reservation = reserve(target, directory);
-            if (reservation == null) continue; // The name is taken: try the next candidate.
-            if (!isUntouched(reservation)) {
-                // Somebody else changed our placeholder: do not touch it, use another name.
-                DiagLog.e(AREA, "Reservation changed by someone else, not touching it: " + target, null);
-                continue;
-            }
+            // Persist intent before creating anything: a death during commit cannot leave an unrecorded name.
+            notifyReserved(listener, target, true);
             try {
-                Os.rename(source.getPath(), target.getPath());
-                return target;
-            } catch (ErrnoException e) {
-                boolean stillOurs = isUntouched(reservation);
-                release(reservation);
-                if (e.errno == OsConstants.EXDEV) {
-                    throw new CrossVolumeException("Source and destination are on different volumes: "
-                            + source + " -> " + target, e);
-                }
-                if (directory && (e.errno == OsConstants.ENOTEMPTY || e.errno == OsConstants.EEXIST)) {
-                    if (stillOurs) {
-                        // Our placeholder is still empty, so the platform itself refused to replace it:
-                        // other names would fail the same way. Stop and fail this item.
-                        throw new IOException("The platform refused to rename a folder onto an empty folder ("
-                                + OsConstants.errnoName(e.errno) + "): " + source + " -> " + target, e);
-                    }
-                    // Someone put something into our placeholder folder; nothing was lost. Next name.
-                    DiagLog.e(AREA, "Reserved folder was filled by someone else: " + target, e);
+                Reservation reservation = reserve(target, directory);
+                if (reservation == null) continue; // The name is taken: try the next candidate.
+                if (!isUntouched(reservation)) {
+                    // Somebody else changed our placeholder: do not touch it, use another name.
+                    DiagLog.e(AREA, "Reservation changed by someone else, not touching it: " + target, null);
                     continue;
                 }
-                throw new IOException("rename failed (" + OsConstants.errnoName(e.errno) + "): " + source
-                        + " -> " + target, e);
+                try {
+                    Os.rename(source.getPath(), target.getPath());
+                    return target;
+                } catch (ErrnoException e) {
+                    boolean stillOurs = isUntouched(reservation);
+                    release(reservation);
+                    if (e.errno == OsConstants.EXDEV) {
+                        throw new CrossVolumeException("Source and destination are on different volumes: "
+                                + source + " -> " + target, e);
+                    }
+                    if (directory && (e.errno == OsConstants.ENOTEMPTY || e.errno == OsConstants.EEXIST)) {
+                        if (stillOurs) {
+                            // Our placeholder is still empty, so the platform itself refused to replace it:
+                            // other names would fail the same way. Stop and fail this item.
+                            throw new IOException("The platform refused to rename a folder onto an empty folder ("
+                                    + OsConstants.errnoName(e.errno) + "): " + source + " -> " + target, e);
+                        }
+                        // Someone put something into our placeholder folder; nothing was lost. Next name.
+                        DiagLog.e(AREA, "Reserved folder was filled by someone else: " + target, e);
+                        continue;
+                    }
+                    throw new IOException("rename failed (" + OsConstants.errnoName(e.errno) + "): " + source
+                            + " -> " + target, e);
+                }
+            } finally {
+                // Covers taken names, changed placeholders and exceptions as well as a completed rename.
+                notifyReserved(listener, target, false);
             }
         }
         throw new IOException("No free name found in " + destination + " for " + name);
+    }
+
+    private static void notifyReserved(ReservationListener listener, File target, boolean reserved) {
+        if (listener == null) return;
+        try {
+            if (reserved) listener.reserved(target);
+            else listener.done(target);
+        } catch (Throwable t) {
+            DiagLog.e(AREA, "Reservation listener failed for " + target, t);
+        }
     }
 
     /** Creates the placeholder atomically (O_EXCL / mkdir). Returns null when the name already exists. */
