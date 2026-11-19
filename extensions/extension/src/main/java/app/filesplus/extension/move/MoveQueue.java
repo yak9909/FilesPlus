@@ -8,11 +8,19 @@ import android.widget.Toast;
 
 import app.filesplus.extension.DiagLog;
 import app.filesplus.extension.ModKit;
+import app.filesplus.extension.clip.ClipItem;
+import app.filesplus.extension.clip.Clipboard;
+import app.filesplus.extension.clip.PasteRules;
+import app.filesplus.extension.clip.PasteTarget;
 import app.filesplus.extension.foldertabs.TabMove;
 
 import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -25,6 +33,9 @@ import java.util.Set;
  * Background move queue that outlives the preview Activity. Files are moved one job per id on a single
  * thread. Audio/video that is still shown on the current preview page is held until the user leaves
  * that page or the preview closes. Holds only the application context, never an Activity or View.
+ *
+ * <p>{@link #paste} runs the clipboard (cut) through the same engine: {@link TabMove#move} on the single file
+ * thread (name reservation and {@code Os.rename}, DESIGN 10.4; no copy, no delete).
  */
 public final class MoveQueue {
     private static final String AREA = "move";
@@ -33,6 +44,8 @@ public final class MoveQueue {
 
     private static long currentId = NO_PAGE;
     private static final List<Job> deferred = new ArrayList<>();
+    /** Sources (lower case) of unfinished paste jobs: the same source is never in two jobs (DESIGN 10.8). */
+    private static final Set<String> inFlight = new HashSet<>();
 
     private MoveQueue() {}
 
@@ -41,11 +54,51 @@ public final class MoveQueue {
         void onDone(int moved, int notMoved);
     }
 
+    /** Called once on the main thread when a {@link #paste} has finished or was refused. */
+    public interface PasteCallback {
+        void onDone(PasteResult result);
+    }
+
+    /** Outcome of one {@link #paste}. */
+    public static final class PasteResult {
+        /** Non-null when nothing was started: the rule that refused the paste. */
+        public PasteRules.Reason refused;
+        public File destination;
+        public int moved;
+        /** Items that no longer existed (deleted or renamed elsewhere, SD card removed). */
+        public int missing;
+        /** Items already in the destination folder (skipped). */
+        public int sameFolder;
+        /** Items that are part of another unfinished paste (skipped, not touched). */
+        public int busy;
+        public int failed;
+        /** Subset of {@link #failed}: items on another volume. */
+        public int crossVolume;
+        /** Items held until the preview page they play on is left. */
+        public int held;
+    }
+
+    /** One paste: its clipboard snapshot, callback and counters. */
+    private static final class PasteJob {
+        final Clipboard.State state;
+        final PasteCallback callback;
+        final PasteResult result = new PasteResult();
+        final List<ClipItem> present = new ArrayList<>();
+        /** The record of this paste in {@link Clipboard#beginPaste}. */
+        long token;
+
+        PasteJob(Clipboard.State state, PasteCallback callback) {
+            this.state = state;
+            this.callback = callback;
+        }
+    }
+
     /** One enqueue call: collects the results of its jobs and reports them once. */
     private static final class Batch {
         final Context app;
         final File destination;
         final Done done;
+        final PasteJob paste;
         int pending;
         int moved;
         int skipped;
@@ -54,9 +107,14 @@ public final class MoveQueue {
         boolean destinationLogged;
 
         Batch(Context app, File destination, Done done, int pending) {
+            this(app, destination, done, null, pending);
+        }
+
+        Batch(Context app, File destination, Done done, PasteJob paste, int pending) {
             this.app = app;
             this.destination = destination;
             this.done = done;
+            this.paste = paste;
             this.pending = pending;
         }
     }
@@ -65,11 +123,18 @@ public final class MoveQueue {
         final Batch batch;
         final long id;
         final String mime;
+        /** Paste jobs know their paths; queue jobs resolve the MediaStore id when they run. */
+        final List<String> paths;
 
         Job(Batch batch, long id, String mime) {
+            this(batch, id, mime, null);
+        }
+
+        Job(Batch batch, long id, String mime, List<String> paths) {
             this.batch = batch;
             this.id = id;
             this.mime = mime;
+            this.paths = paths;
         }
     }
 
@@ -153,7 +218,10 @@ public final class MoveQueue {
     }
 
     private static boolean isDeferrable(Job job) {
-        String mime = job.mime;
+        return isDeferrable(job.mime);
+    }
+
+    private static boolean isDeferrable(String mime) {
         if (mime == null) return false;
         if (mime.startsWith("video/") || mime.startsWith("audio/")) return true;
         // Odd types such as application/ogg: decide by the extension the type stands for.
@@ -188,12 +256,28 @@ public final class MoveQueue {
                 if (first) DiagLog.e(AREA, "Destination unusable: " + destination, null);
                 failed = 1;
             } else {
-                List<String> paths = TabMove.pathsOf(job.batch.app, new long[]{job.id});
+                List<String> paths = job.paths != null ? job.paths : TabMove.pathsOf(job.batch.app, new long[]{job.id});
                 if (paths.isEmpty()) {
                     DiagLog.e(AREA, "No path for id " + job.id, null);
                     failed = 1;
                 } else {
-                    TabMove.Result result = TabMove.move(job.batch.app, paths, destination);
+                    TabMove.ReservationListener listener = null;
+                    if (job.batch.paste != null) {
+                        // Every reserved name is written down before its rename: a process that dies in between
+                        // leaves a 0-byte placeholder, and the next paste can say where to look.
+                        Batch batch = job.batch;
+                        long token = batch.paste.token;
+                        listener = new TabMove.ReservationListener() {
+                            @Override public void reserved(File target) {
+                                Clipboard.reserve(batch.app, token, target.getPath());
+                            }
+
+                            @Override public void done(File target) {
+                                Clipboard.unreserve(batch.app, token, target.getPath());
+                            }
+                        };
+                    }
+                    TabMove.Result result = TabMove.move(job.batch.app, paths, destination, listener);
                     moved = result.moved;
                     skipped = result.skipped;
                     failed = result.failed;
@@ -210,6 +294,7 @@ public final class MoveQueue {
     private static void finish(Job job, int moved, int skipped, int failed, int crossVolume) {
         try {
             Batch batch = job.batch;
+            if (job.paths != null) release(job.paths);
             boolean done;
             int totalMoved, totalSkipped, totalFailed, totalCross;
             synchronized (batch) {
@@ -225,7 +310,11 @@ public final class MoveQueue {
                 totalCross = batch.crossVolume;
             }
             if (!done) return;
-            if (totalMoved > 0) DestinationHistory.record(batch.destination.getPath());
+            if (batch.paste != null) {
+                finishPaste(batch, totalMoved, totalSkipped, totalFailed, totalCross);
+                return;
+            }
+            if (totalMoved > 0) DestinationHistory.recordLast(batch.destination);
             String text = message(batch.destination, totalMoved, totalSkipped, totalFailed);
             if (totalCross > 0) text += "\n" + TabMove.crossVolumeNote(batch.app);
             toast(batch.app, text);
@@ -244,6 +333,281 @@ public final class MoveQueue {
         } catch (Throwable t) {
             DiagLog.e(AREA, "finish failed", t);
         }
+    }
+
+    // ---- paste (clipboard cut -> folder) ---------------------------------------------------------------------
+
+    /** Pastes the clipboard into an existing folder. See {@link #paste(Context, Clipboard.State, File, boolean, PasteCallback)}. */
+    public static void paste(Context app, Clipboard.State state, File dest, PasteCallback callback) {
+        paste(app, state, dest, false, callback);
+    }
+
+    /**
+     * Moves the items of a cut clipboard into {@code dest}, one batch on the single file thread. Returns at once;
+     * the callback runs on the main thread when everything is done (items that play on the current preview page
+     * wait until the page is left, as in the move queue). Safe to call twice: the rules are checked again here, a
+     * source that is already part of an unfinished paste is skipped (counted as busy), and items that no longer
+     * exist are skipped and counted as missing.
+     *
+     * <p>A successful paste empties the clipboard; after failures only the items that are still where they were
+     * stay in it. The destination becomes the "last pasted folder". With {@code createIfMissing} a missing
+     * destination folder is created (one level, below an existing writable folder).
+     */
+    public static void paste(Context app, Clipboard.State state, File dest, boolean createIfMissing,
+                             PasteCallback callback) {
+        PasteJob paste = new PasteJob(state, callback);
+        paste.result.destination = dest;
+        Context context = null;
+        List<ClipItem> claimed = new ArrayList<>();
+        try {
+            context = ModKit.context();
+            if (context == null && app != null) context = app.getApplicationContext();
+            if (context == null) context = app;
+            if (context == null || state == null || state.items.isEmpty()) {
+                paste.result.refused = PasteRules.Reason.EMPTY;
+                reportPaste(context, paste);
+                return;
+            }
+            if (dest == null) {
+                paste.result.refused = PasteRules.Reason.NOT_WRITABLE;
+                reportPaste(context, paste);
+                return;
+            }
+            // Claim the sources first, on the caller's thread, so a double tap cannot start a second job for them.
+            Set<String> seen = new HashSet<>();
+            synchronized (LOCK) {
+                for (ClipItem item : state.items) {
+                    String key = item.path().toLowerCase(Locale.ROOT);
+                    if (!seen.add(key)) continue; // The same path twice in one clipboard is one item.
+                    if (inFlight.add(key)) claimed.add(item);
+                    else paste.result.busy++;
+                }
+            }
+            if (claimed.isEmpty()) {
+                reportPaste(context, paste);
+                return;
+            }
+            Context ctx = context;
+            boolean create = createIfMissing;
+            List<ClipItem> toPlan = claimed;
+            TabMove.fileExecutor().execute(() -> plan(ctx, paste, dest, create, toPlan));
+        } catch (Throwable t) {
+            DiagLog.e(AREA, "paste failed", t);
+            for (ClipItem item : claimed) release(Collections.singletonList(item.path()));
+            paste.result.refused = PasteRules.Reason.NOT_WRITABLE;
+            try {
+                reportPaste(context, paste);
+            } catch (Throwable ignored) {
+                // Nothing more to do.
+            }
+        }
+    }
+
+    /** Runs on the file thread: re-checks the rules, drops missing items, defers playing ones, moves the rest. */
+    private static void plan(Context context, PasteJob paste, File dest, boolean createIfMissing,
+                             List<ClipItem> claimed) {
+        boolean started = false;
+        try {
+            warnInterrupted(context);
+            PasteRules.Result check = PasteRules.check(paste.state, PasteTarget.ofFolder(dest, createIfMissing));
+            if (!check.ok) {
+                release(claimed);
+                paste.result.refused = check.reason;
+                reportPaste(context, paste);
+                return;
+            }
+            if (!dest.isDirectory() && createIfMissing && !dest.mkdir() && !dest.isDirectory()) {
+                release(claimed);
+                paste.result.refused = PasteRules.Reason.NOT_WRITABLE;
+                reportPaste(context, paste);
+                return;
+            }
+            // Items that are gone are skipped and counted; they are never an error.
+            for (ClipItem item : claimed) {
+                if (Files.exists(new File(item.path()).toPath(), LinkOption.NOFOLLOW_LINKS)) {
+                    paste.present.add(item);
+                } else {
+                    paste.result.missing++;
+                    release(Collections.singletonList(item.path()));
+                }
+            }
+            paste.token = Clipboard.beginPaste(context, dest.getPath());
+            started = true;
+
+            // Decide in one step which items wait for the preview and set the counter before anything can finish.
+            Batch batch;
+            List<ClipItem> now = new ArrayList<>();
+            List<Job> held = new ArrayList<>();
+            synchronized (LOCK) {
+                List<ClipItem> waiting = new ArrayList<>();
+                for (ClipItem item : paste.present) {
+                    boolean playing = item.mediaId() > 0 && item.mediaId() == currentId
+                            && isDeferrable(mimeOf(item.name()));
+                    if (playing) waiting.add(item);
+                    else now.add(item);
+                }
+                batch = new Batch(context, dest, null, paste, (now.isEmpty() ? 0 : 1) + waiting.size());
+                for (ClipItem item : waiting) {
+                    Job job = new Job(batch, item.mediaId(), mimeOf(item.name()),
+                            Collections.singletonList(item.path()));
+                    deferred.add(job);
+                    held.add(job);
+                }
+            }
+            paste.result.held = held.size();
+            DiagLog.i(AREA, "Paste " + paste.present.size() + " item(s) to " + dest + ", held " + held.size()
+                    + ", missing " + paste.result.missing + ", busy " + paste.result.busy);
+            if (batch.pending == 0) {
+                finishPaste(batch, 0, 0, 0, 0);
+                return;
+            }
+            if (!held.isEmpty()) toast(context, heldText(context, held.size()));
+            if (!now.isEmpty()) {
+                List<String> paths = new ArrayList<>();
+                for (ClipItem item : now) paths.add(item.path());
+                run(new Job(batch, 0, null, paths)); // Already on the file thread.
+            }
+        } catch (Throwable t) {
+            DiagLog.e(AREA, "paste plan failed", t);
+            release(claimed);
+            if (started) Clipboard.endPaste(context, paste.token);
+            paste.result.refused = PasteRules.Reason.NOT_WRITABLE;
+            reportPaste(context, paste);
+        }
+    }
+
+    /**
+     * A paste that was cut short by the process dying may have left a 0-byte placeholder (or an empty folder) at
+     * the name it had reserved. Say so once, at the next paste; the record stays in Diagnostics until dismissed.
+     * Nothing is deleted or resumed.
+     */
+    private static void warnInterrupted(Context context) {
+        List<Clipboard.Interrupted> fresh = new ArrayList<>();
+        for (Clipboard.Interrupted record : Clipboard.interrupted(context)) {
+            if (!record.toasted) fresh.add(record);
+        }
+        if (fresh.isEmpty()) return;
+        Clipboard.markInterruptedToasted(context);
+        String folder = fresh.get(fresh.size() - 1).destination;
+        boolean ja = "ja".equals(context.getResources().getConfiguration().getLocales().get(0).getLanguage());
+        String more = fresh.size() > 1 ? (ja ? "（ほか " + (fresh.size() - 1) + " 件）" : " (and " + (fresh.size() - 1) + " more)") : "";
+        toast(context, ja ? "前回の貼り付けが途中で止まりました: " + folder + more
+                + "。0 バイトのファイルが残っていないか確かめてください（診断に記録があります）"
+                : "The previous paste into " + folder + more + " was interrupted; check for leftover 0-byte files"
+                + " (see Diagnostics)");
+    }
+
+    private static void release(List<?> paths) {
+        synchronized (LOCK) {
+            for (Object path : paths) {
+                inFlight.remove((path instanceof ClipItem ? ((ClipItem) path).path() : (String) path)
+                        .toLowerCase(Locale.ROOT));
+            }
+        }
+    }
+
+    private static String mimeOf(String name) {
+        if (name == null) return null;
+        int dot = name.lastIndexOf('.');
+        if (dot < 0 || dot == name.length() - 1) return null;
+        return MimeTypeMap.getSingleton().getMimeTypeFromExtension(name.substring(dot + 1).toLowerCase(Locale.ROOT));
+    }
+
+    /** Last unit of a paste is done: update the clipboard and the last folder, tell the user and the caller. */
+    private static void finishPaste(Batch batch, int moved, int sameFolder, int failed, int crossVolume) {
+        PasteJob paste = batch.paste;
+        try {
+            PasteResult result = paste.result;
+            result.moved = moved;
+            result.sameFolder = sameFolder;
+            result.failed = failed;
+            result.crossVolume = crossVolume;
+            if (moved > 0) DestinationHistory.recordLast(batch.destination);
+            // Success empties the clipboard. After failures the items that are still where they were stay in it.
+            List<ClipItem> remaining = new ArrayList<>();
+            if (failed > 0) {
+                for (ClipItem item : paste.present) {
+                    if (stillThere(item, batch.destination)) remaining.add(item);
+                }
+            }
+            Clipboard.finishCut(batch.app, paste.state, remaining);
+        } catch (Throwable t) {
+            DiagLog.e(AREA, "paste finish failed", t);
+        } finally {
+            try {
+                Clipboard.endPaste(batch.app, paste.token);
+            } catch (Throwable t) {
+                DiagLog.e(AREA, "paste marker not cleared", t);
+            }
+        }
+        reportPaste(batch.app, paste);
+    }
+
+    /** True when the item still exists at its old place and that place is not the destination folder. */
+    private static boolean stillThere(ClipItem item, File destination) {
+        try {
+            File source = new File(item.path());
+            if (!Files.exists(source.toPath(), LinkOption.NOFOLLOW_LINKS)) return false;
+            File parent = source.getAbsoluteFile().getParentFile();
+            return parent == null || !parent.getCanonicalPath().toLowerCase(Locale.ROOT)
+                    .equals(destination.getCanonicalPath().toLowerCase(Locale.ROOT));
+        } catch (IOException e) {
+            return true; // Cannot tell: keep it so the user can try again.
+        }
+    }
+
+    /** Toast with the full destination path and the counts, then the callback on the main thread. */
+    private static void reportPaste(Context context, PasteJob paste) {
+        PasteResult result = paste.result;
+        if (context != null) {
+            toast(context, result.refused != null
+                    ? PasteRules.message(context, result.refused, paste.state == null ? 0 : paste.state.items.size(),
+                            result.destination == null ? "" : result.destination.getName())
+                    : pasteMessage(context, result));
+        }
+        if (paste.callback == null) return;
+        new Handler(Looper.getMainLooper()).post(() -> {
+            try {
+                paste.callback.onDone(result);
+            } catch (Throwable t) {
+                DiagLog.e(AREA, "paste callback failed", t);
+            }
+        });
+    }
+
+    private static String heldText(Context context, int count) {
+        boolean ja = "ja".equals(context.getResources().getConfiguration().getLocales().get(0).getLanguage());
+        return ja ? count + " 件は再生が終わるまで待ちます" : count + (count == 1 ? " item waits" : " items wait")
+                + " until playback is left";
+    }
+
+    private static String pasteMessage(Context context, PasteResult r) {
+        boolean ja = "ja".equals(context.getResources().getConfiguration().getLocales().get(0).getLanguage());
+        String path = r.destination.getPath();
+        StringBuilder sb = new StringBuilder();
+        if (r.moved == 0 && r.failed > 0) {
+            sb.append(ja ? "貼り付けできませんでした（" + r.failed + " 件）" : "Could not paste " + r.failed
+                    + (r.failed == 1 ? " item" : " items"));
+        } else if (r.moved == 0) {
+            sb.append(ja ? "貼り付けるものがありませんでした" : "Nothing to paste");
+        } else if (ja) {
+            sb.append(r.moved).append(" 件を ").append(path).append(" に貼り付けました");
+        } else {
+            sb.append("Pasted ").append(r.moved).append(r.moved == 1 ? " item" : " items").append(" to ").append(path);
+        }
+        if (ja) {
+            if (r.missing > 0) sb.append("（").append(r.missing).append(" 件はなくなっていたためスキップ）");
+            if (r.sameFolder > 0) sb.append("（").append(r.sameFolder).append(" 件はすでにそのフォルダにあります）");
+            if (r.busy > 0) sb.append("（").append(r.busy).append(" 件は処理中のためスキップ）");
+            if (r.failed > 0 && r.moved > 0) sb.append("（").append(r.failed).append(" 件は失敗）");
+        } else {
+            if (r.missing > 0) sb.append(" (").append(r.missing).append(" missing, skipped)");
+            if (r.sameFolder > 0) sb.append(" (").append(r.sameFolder).append(" already in the folder)");
+            if (r.busy > 0) sb.append(" (").append(r.busy).append(" busy, skipped)");
+            if (r.failed > 0 && r.moved > 0) sb.append(" (").append(r.failed).append(" failed)");
+        }
+        if (r.crossVolume > 0) sb.append('\n').append(TabMove.crossVolumeNote(ja));
+        return sb.toString();
     }
 
     private static String message(File destination, int moved, int skipped, int failed) {
