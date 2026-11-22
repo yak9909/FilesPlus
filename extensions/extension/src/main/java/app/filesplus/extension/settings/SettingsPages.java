@@ -360,6 +360,8 @@ public final class SettingsPages {
     }
 
     private void diagnostics() {
+        row(screen, tr("クリップボードのフック", "Clipboard hooks"),
+                app.filesplus.extension.clip.ClipHooks.installedHooks(), null);
         deviceReport = deviceReport();
         row(screen, tr("端末情報", "Device information"), deviceReport, () -> report(pageTitle(), deviceReport, true));
         Object codecs = row(screen, tr("動画デコーダー", "Video decoders"),

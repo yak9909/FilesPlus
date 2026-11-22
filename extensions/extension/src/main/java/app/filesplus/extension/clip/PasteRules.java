@@ -109,16 +109,10 @@ public final class PasteRules {
         int inTarget = 0;
         for (ClipItem item : state.items) {
             File raw = new File(item.path());
-            File parent = raw.getAbsoluteFile().getParentFile();
-            // The item itself is not resolved: a link is moved as the link. Only its folder is canonical.
-            File source = parent == null ? raw : new File(parent.getCanonicalFile(), raw.getName());
+            File source = canonicalSource(raw);
             File volume = volumeOf(source, roots);
-            if (volume == null) {
-                // Gone (an unmounted SD card) is skipped later as missing; a file that is there is not ours to move.
-                if (Files.exists(source.toPath(), LinkOption.NOFOLLOW_LINKS)) return Result.refused(Reason.PROTECTED);
-                continue;
-            }
-            if (isSystemFolder(relative(volume, source))) return Result.refused(Reason.PROTECTED);
+            if (protectedSource(source, volume)) return Result.refused(Reason.PROTECTED);
+            if (volume == null) continue; // A missing source on an unmounted volume is skipped later.
             sources.add(source);
             sourceVolumes.add(volume);
             if (item.isDir() && within(destCanonical, source)) return Result.refused(Reason.INTO_SELF);
@@ -156,6 +150,23 @@ public final class PasteRules {
         if (!createIfMissing || dest.exists()) return false;
         File parent = dest.getAbsoluteFile().getParentFile();
         return parent != null && parent.isDirectory() && parent.canWrite();
+    }
+
+    /** Shared cut/paste protection: resolve the parent, preserving the source itself when it is a link. */
+    static boolean protectedSource(File raw, List<File> roots) throws IOException {
+        File source = canonicalSource(raw);
+        return protectedSource(source, volumeOf(source, canonicalRoots(roots)));
+    }
+
+    private static File canonicalSource(File raw) throws IOException {
+        File parent = raw.getAbsoluteFile().getParentFile();
+        return parent == null ? raw : new File(parent.getCanonicalFile(), raw.getName());
+    }
+
+    private static boolean protectedSource(File source, File volume) {
+        // A missing source outside the mounted volumes is skipped later; an existing one is protected.
+        return volume == null ? Files.exists(source.toPath(), LinkOption.NOFOLLOW_LINKS)
+                : isSystemFolder(relative(volume, source));
     }
 
     private static List<File> canonicalRoots(List<File> roots) throws IOException {
