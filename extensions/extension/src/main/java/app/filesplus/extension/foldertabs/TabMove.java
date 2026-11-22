@@ -93,17 +93,25 @@ public final class TabMove {
 
     /** Resolves MediaStore ids to file paths. Blocking: call off the UI thread. */
     public static List<String> pathsOf(Context context, long[] ids) {
+        return pathsOf(context, ids, null);
+    }
+
+    /** Also retains each known MediaStore id for clipboard consumers. Blocking, like pathsOf. */
+    public static List<String> pathsOf(Context context, long[] ids, java.util.Map<String, Long> known) {
         List<String> paths = new ArrayList<>();
         for (int from = 0; from < ids.length; from += CHUNK) {
             int to = Math.min(ids.length, from + CHUNK);
             String[] args = new String[to - from];
             for (int i = from; i < to; i++) args[i - from] = Long.toString(ids[i]);
             String selection = "_id IN (" + String.join(",", Collections.nCopies(args.length, "?")) + ")";
-            try (Cursor cursor = context.getContentResolver().query(FILES, new String[]{"_data"},
+            try (Cursor cursor = context.getContentResolver().query(FILES, new String[]{"_data", "_id"},
                     selection, args, null)) {
                 if (cursor != null) while (cursor.moveToNext()) {
                     String data = cursor.getString(0);
-                    if (data != null) paths.add(data);
+                    if (data != null) {
+                        paths.add(data);
+                        if (known != null) known.put(data, cursor.getLong(1));
+                    }
                 }
             }
         }

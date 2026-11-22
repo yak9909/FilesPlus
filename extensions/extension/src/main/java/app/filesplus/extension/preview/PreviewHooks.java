@@ -66,6 +66,7 @@ public final class PreviewHooks {
             }
             // The first page is shown without a page-change callback, so the menu also syncs the check mark.
             updateOverlay(root, id, hasId);
+            app.filesplus.extension.clip.ClipHooks.preview(root, menu, id, hasId, entry);
         } catch (Throwable t) { hookError(t); }
     }
 
