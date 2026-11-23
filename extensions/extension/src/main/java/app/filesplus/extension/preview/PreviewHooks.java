@@ -19,6 +19,7 @@ import java.lang.ref.WeakReference;
 
 import app.filesplus.extension.DiagLog;
 import app.filesplus.extension.ModKit;
+import app.filesplus.extension.clip.ClipHooks;
 import app.filesplus.extension.move.MoveQueue;
 
 /**
@@ -58,7 +59,7 @@ public final class PreviewHooks {
                 menu.add(Menu.NONE, SELECT_ITEM, Menu.NONE, title).setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
             }
             // The first page is shown without a page-change callback, so the menu also syncs the move queue.
-            notePage(id, hasId);
+            notePage(id, hasId, entry);
             int count = SelectionStore.count();
             if (count > 0 && menu.findItem(COUNT_ITEM) == null) {
                 String title = ja ? "選択中 " + count + " 件" : count + " selected";
@@ -71,17 +72,17 @@ public final class PreviewHooks {
     }
 
     /** Called when the gallery pager settles on another file: moves the check mark with it. */
-    public static void onPageSelected(View galleryRoot, long id, boolean hasId) {
+    public static void onPageSelected(View galleryRoot, long id, boolean hasId, Object entry) {
         try {
-            notePage(id, hasId);
+            notePage(id, hasId, entry);
             updateOverlay(galleryRoot, id, hasId);
         } catch (Throwable t) { hookError(t); }
     }
 
     /** Remembers the current page and lets the move queue release held jobs of files that are no longer shown. */
-    private static void notePage(long id, boolean hasId) {
+    private static void notePage(long id, boolean hasId, Object entry) {
         currentId = hasId ? id : 0L;
-        MoveQueue.onPageChanged(currentId);
+        MoveQueue.onPageChanged(currentId, ClipHooks.previewPagePath(entry));
     }
 
     /**

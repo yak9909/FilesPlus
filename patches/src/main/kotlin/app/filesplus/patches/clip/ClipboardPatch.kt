@@ -27,6 +27,11 @@ private const val VIEW = "Landroid/view/View;"
 private const val OBJECT = "Ljava/lang/Object;"
 private const val LIST = "Ljava/util/List;"
 private const val POPUP = "Landroid/widget/PopupMenu;"
+private const val STRING = "Ljava/lang/String;"
+private const val MATERIAL_BUTTON = "Lcom/google/android/material/button/MaterialButton;"
+private const val DRAWABLE = "Landroid/graphics/drawable/Drawable;"
+private val inflateView = listOf("Landroid/view/LayoutInflater;",
+    "Landroid/view/ViewGroup;", "Landroid/os/Bundle;")
 private val ids = mutableMapOf<String, Long>()
 
 private val clipboardResources = resourcePatch {
@@ -39,6 +44,14 @@ private val clipboardResources = resourcePatch {
                 ids[entry.getAttribute("type") + "/" + entry.getAttribute("name")] =
                     entry.getAttribute("id").removePrefix("0x").toLong(16)
             }
+        }
+        document("AndroidManifest.xml").use { manifest ->
+            val application = manifest.getElementsByTagName("application").item(0) as Element
+            val relay = manifest.createElement("activity")
+            relay.setAttribute("android:name", "app.filesplus.extension.clip.PastePickerActivity")
+            relay.setAttribute("android:exported", "false")
+            relay.setAttribute("android:theme", "@android:style/Theme.Translucent.NoTitleBar")
+            application.appendChild(relay)
         }
     }
 }
@@ -73,8 +86,11 @@ private fun MutableClass.after(target: MutableMethod, body: String) {
     val wrapper = MutableMethod(ImmutableMethod(type, name,
         types.map { ImmutableMethodParameter(it, emptySet(), null) }, target.returnType, flags,
         emptySet(), emptySet(), MutableMethodImplementation(words + 8)))
-    val result = if (target.returnType == "V") "" else "move-result-object v0"
-    val ret = if (target.returnType == "V") "return-void" else "return-object v0"
+    val (result, ret) = when (target.returnType) {
+        "V" -> "" to "return-void"
+        "Z" -> "move-result v0" to "return v0"
+        else -> "move-result-object v0" to "return-object v0"
+    }
     wrapper.addInstructions(0, """
         invoke-direct/range {p0 .. p${words - 1}}, $target
         $result
@@ -95,7 +111,7 @@ private fun MutableClass.after(target: MutableMethod, body: String) {
 
 val clipboardPatch = bytecodePatch(
     name = "Clipboard",
-    description = "Add Cut and Add to clipboard to the app's browser and preview menus.",
+    description = "Cut and paste files from the app's browsers and preview.",
     default = true,
 ) {
     compatibleWith(Constants.COMPATIBILITY_FILES)
@@ -134,6 +150,15 @@ val clipboardPatch = bytecodePatch(
         val rootView = classDefBy(fragmentType).methods.one("media root view") {
             it.parameterTypes.isEmpty() && it.returnType == VIEW
         }
+        val mediaMenu = mediaOwner.methods.one("media overflow creator") {
+            it.parameterTypes == listOf(MENU) && it.resource("menu/tabbed_fragment_menu_v2")
+        }
+        mediaOwner.after(mediaMenu, """
+            iget-object v1, p0, $fragment
+            invoke-virtual {v1}, $rootView
+            move-result-object v1
+            invoke-static {v1, p1}, $HOOK->pasteMenu($VIEW$MENU)V
+        """.trimIndent())
         mediaOwner.after(capture, """
             ${mediaOwner.actionMenu()}
             iget-object v2, p0, $fragment
@@ -204,6 +229,77 @@ val clipboardPatch = bytecodePatch(
         }
         val peer = options.calls().first { it.definingClass == storageFragment.type && it.returnType == storage.type &&
             it.parameterTypes.isEmpty() }
+        storageFragment.methods.one("storage overflow creator") {
+            it.parameterTypes == listOf(MENU, INFLATER) && it.resource("menu/advanced_browsing_top_menu_v2")
+        }.also { check(it == options) }
+
+        val storageView = storageFragment.methods.one("storage bar view") {
+            it.parameterTypes == inflateView && it.returnType == VIEW &&
+                it.resource("layout/advanced_browsing_browser_fragment_v2")
+        }
+        val pickerView = classDefBy { cls -> cls.methods.any {
+            it.parameterTypes == inflateView && it.resource("layout/advanced_browsing_picker_fragment")
+        } }.methods.one("native picker view") {
+            it.parameterTypes == inflateView && it.returnType == VIEW &&
+                it.resource("layout/advanced_browsing_picker_fragment")
+        }
+        check(pickerView.definingClass != storageView.definingClass)
+        val iconSetter = pickerView.calls().distinctBy { it.toString() }.one("native picker button icon") {
+            it.definingClass == MATERIAL_BUTTON && it.parameterTypes == listOf(DRAWABLE) && it.returnType == "V"
+        }
+        // The fragment's peer reads the last folder from its own arguments. The drop target uses that same field.
+        val folder = storageView.currentFolderField(storage.type, folderType)
+        val fab = storage.methods.one("storage FAB variant") {
+            it.parameterTypes == listOf(VIEW, "I") && it.resource("id/create_new_folder_expressive") &&
+                it.resource("id/create_new_folder")
+        }
+        val fabFlag = fab.code().single { it.opcode == Opcode.IGET_BOOLEAN }.ref() as FieldReference
+        val flagHolder = fab.fields().single { it.definingClass == storage.type && it.type == fabFlag.definingClass }
+        storageFragment.after(storageView, """
+            invoke-virtual {p0}, $peer
+            move-result-object v1
+            iget-object v2, v1, $folder
+            invoke-static {v2}, $HOOK->bytes($OBJECT)[B
+            move-result-object v2
+            iget-object v1, v1, $flagHolder
+            iget-boolean v1, v1, $fabFlag
+            invoke-static {v0, v2, v1}, $HOOK->attachStoragePaste($VIEW[BZ)V
+        """.trimIndent())
+
+        val mediaView = classDefBy { cls -> cls.methods.any {
+            it.parameterTypes == inflateView && it.resource("layout/tabbed_file_browser_fragment_v3")
+        } }.methods.one("media bar view") {
+            it.parameterTypes == inflateView && it.returnType == VIEW && it.resource("layout/tabbed_file_browser_fragment_v3")
+        }
+        val mediaScreen = mutableClassDefBy(mediaView.definingClass)
+        val categoryType = mediaOwner.fields.map { it.type }.distinct().single { type ->
+            type.startsWith("L") && classDefByOrNull(type)?.methods?.any {
+                it.name == "<clinit>" && it.string("CATEGORY_IMAGE") && it.string("CATEGORY_DOWNLOAD")
+            } == true
+        }
+        val mediaPeer = mediaView.calls().distinctBy { it.toString() }.single {
+            it.definingClass == mediaScreen.type && it.parameterTypes.isEmpty() &&
+                classDefByOrNull(it.returnType)?.fields?.any { f -> f.type == categoryType } == true
+        }
+        val category = classDefBy(mediaPeer.returnType).fields.single { it.type == categoryType }
+        mediaScreen.after(mediaScreen.methods.single { it.toString() == mediaView.toString() }, """
+            invoke-virtual {p0}, $mediaPeer
+            move-result-object v1
+            iget-object v1, v1, $category
+            invoke-virtual {v1}, Ljava/lang/Enum;->name()$STRING
+            move-result-object v1
+            invoke-static {v0, v1}, $HOOK->attachMediaPaste($VIEW$STRING)V
+        """.trimIndent())
+
+        val flagOwner = mutableClassDefBy(classDefBy { cls -> cls.methods.any {
+            it.returnType == "Z" && it.parameterTypes.isEmpty() && it.string("45676054") &&
+                it.string("com.google.android.apps.nbu.files.device")
+        } })
+        val readFlag = flagOwner.methods.one("media paste bar phenotype reader") {
+            it.returnType == "Z" && it.parameterTypes.isEmpty() && it.string("45676054") &&
+                it.string("com.google.android.apps.nbu.files.device")
+        }
+        flagOwner.after(readFlag, "invoke-static {v0}, $HOOK->pasteBarFlag(Z)V")
         val optionsHelper = MutableMethod(ImmutableMethod(storage.type, "modKitClipOptions",
             listOf(ImmutableMethodParameter(MENU, emptySet(), null)), "V", AccessFlags.PUBLIC.value,
             emptySet(), emptySet(), MutableMethodImplementation(10)))
@@ -223,6 +319,9 @@ val clipboardPatch = bytecodePatch(
         }
         storage.methods.add(optionsHelper)
         storageFragment.after(options, """
+            invoke-virtual {p0}, $rootView
+            move-result-object v1
+            invoke-static {v1, p1}, $HOOK->pasteMenu($VIEW$MENU)V
             const v1, ${ids.getValue("id/move_to_action")}
             invoke-interface {p1, v1}, $MENU->findItem(I)Landroid/view/MenuItem;
             move-result-object v1
@@ -314,6 +413,7 @@ val clipboardPatch = bytecodePatch(
             } else ""
             provider.after(listMethod, """
                 $mode
+                ${if (label == "media") "const/4 v2, 0x1\ninvoke-static {v2}, $HOOK->observedPasteBarFlag(Z)V" else ""}
                 instance-of v2, p1, $folderType
                 invoke-static {p1}, $HOOK->bytes($OBJECT)[B
                 move-result-object v1
@@ -338,17 +438,78 @@ val clipboardPatch = bytecodePatch(
                     invoke-static {v1, v2, v3}, $HOOK->popup($MENU[BZ)V
                     :done
                 """.trimIndent())
+            } else {
+                val popupMethod = provider.methods.one("media popup variant observer") {
+                    it.parameterTypes == listOf(POPUP, OBJECT) &&
+                        it.returnType == "Landroid/widget/PopupMenu\$OnMenuItemClickListener;"
+                }
+                provider.after(popupMethod, """
+                    invoke-virtual {p1}, $POPUP->getMenu()$MENU
+                    move-result-object v1
+                    const v2, ${ids.getValue("id/popup_copy_to")}
+                    invoke-interface {v1, v2}, $MENU->findItem(I)Landroid/view/MenuItem;
+                    move-result-object v1
+                    if-eqz v1, :done
+                    const/4 v1, 0x0
+                    invoke-static {v1}, $HOOK->observedPasteBarFlag(Z)V
+                    :done
+                """.trimIndent())
             }
         }
         val hooks = mutableClassDefBy(HOOK)
+        hooks.methods.single { it.name == "setPasteIcon" }.apply {
+            addInstructions(0, """
+                check-cast p0, $MATERIAL_BUTTON
+                invoke-virtual/range {p0 .. p1}, $iconSetter
+                const/4 v0, 0x1
+                return v0
+                move-exception v0
+                invoke-static {v0}, $HOOK->hookError(Ljava/lang/Throwable;)V
+                const/4 v0, 0x0
+                return v0
+            """.trimIndent())
+            implementation!!.apply {
+                addCatch("Ljava/lang/Throwable;", newLabelForIndex(0), newLabelForIndex(4), newLabelForIndex(4))
+            }
+        }
         hooks.methods.single { it.name == "installed" }.apply {
             addInstructions(0, "const/4 v0, 0x1\nreturn v0")
         }
         hooks.methods.single { it.name == "installedHooks" }.apply {
             addInstructions(0, """
-                const-string v0, "Installed: media selection; storage selection/options; storage file/folder popup + long press; media popup; storage/media lists; preview"
+                const-string v0, "Installed: media selection; storage selection/options; storage file/folder popup + long press; media popup; storage/media lists; preview; storage/media paste bars and overflow; storage current folder; media bar flag; picker relay"
                 return-object v0
             """.trimIndent())
         }
     }
+}
+
+/** Follow the folder argument to the native top-level drop target back to its field load. */
+private fun Method.currentFolderField(owner: String, folderType: String): FieldReference {
+    val instructions = code()
+    val anchor = instructions.indexOfFirst { (it.ref() as? StringReference)?.string == "OnDropToAdvancedBrowserTopLevel" }
+    check(anchor >= 0) { "Clipboard storage folder drop anchor missing" }
+    val callAt = (anchor + 1 until instructions.size).first { index ->
+        val call = instructions[index].ref() as? MethodReference
+        call != null && call.parameterTypes.firstOrNull() == VIEW && folderType in call.parameterTypes &&
+            STRING in call.parameterTypes && call.returnType == "V"
+    }
+    val invoke = instructions[callAt] as RegisterRangeInstruction
+    val reference = instructions[callAt].ref() as MethodReference
+    check(instructions[callAt].opcode == Opcode.INVOKE_STATIC_RANGE)
+    val argument = reference.parameterTypes.indexOf(folderType)
+    check(reference.parameterTypes.take(argument).all { it != "J" && it != "D" })
+    var register = invoke.startRegister + argument
+    for (index in callAt - 1 downTo 0) {
+        val instruction = instructions[index]
+        if ((instruction as? OneRegisterInstruction)?.registerA != register) continue
+        if (instruction.opcode in setOf(Opcode.MOVE_OBJECT, Opcode.MOVE_OBJECT_FROM16, Opcode.MOVE_OBJECT_16)) {
+            register = (instruction as TwoRegisterInstruction).registerB
+        } else if (instruction.opcode == Opcode.IGET_OBJECT) {
+            val field = instruction.ref() as FieldReference
+            check(field.definingClass == owner && field.type == folderType)
+            return listOf(field).one("storage current folder field") { it == field }
+        }
+    }
+    error("Clipboard storage current folder load missing")
 }

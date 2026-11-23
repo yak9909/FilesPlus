@@ -23,6 +23,8 @@ public final class ModSettings {
     public static final boolean DEFAULT_TABS_SHOW_EMPTY_FOLDERS = false;
     public static final boolean DEFAULT_TABS_SHOW_HIDDEN = false;
 
+    public static final String PASTE_ALL_TAB = "paste.allTab";
+
     private ModSettings() {}
 
     public static SharedPreferences prefs() {
@@ -72,5 +74,19 @@ public final class ModSettings {
 
     public static boolean skipRewindToStart() {
         return getBool(SKIP_REWIND_TO_START, DEFAULT_SKIP_REWIND_TO_START);
+    }
+
+    public static String pasteAllTab() {
+        try {
+            SharedPreferences p = prefs();
+            return p == null ? "off" : p.getString(PASTE_ALL_TAB, "off");
+        } catch (Throwable t) {
+            return "off";
+        }
+    }
+
+    public static void setPasteAllTab(String value) {
+        SharedPreferences p = prefs();
+        if (p != null) p.edit().putString(PASTE_ALL_TAB, value).apply();
     }
 }

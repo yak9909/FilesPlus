@@ -144,7 +144,8 @@ public final class SettingsPages {
     }
 
     private static boolean hasItems(String id) {
-        return "tabs".equals(id) || "skip".equals(id) || "smb".equals(id) || "diag".equals(id);
+        return "tabs".equals(id) || "skip".equals(id) || "clipboard".equals(id)
+                || "smb".equals(id) || "diag".equals(id);
     }
 
     private String pageTitle() { return titleOf(page); }
@@ -165,7 +166,6 @@ public final class SettingsPages {
     private void populate() {
         switch (page) {
             case "root":
-                // Pages without items yet (preview, clipboard, switch) get no entry.
                 for (String id : new String[]{"tabs", "skip", "preview", "clipboard", "switch", "smb", "diag"}) {
                     if (hasItems(id)) link(screen, id, titleOf(id));
                 }
@@ -184,9 +184,10 @@ public final class SettingsPages {
                                 "A double-tap rewind closer to the start than the skip duration goes to the start."),
                         ModSettings.SKIP_REWIND_TO_START, ModSettings.DEFAULT_SKIP_REWIND_TO_START);
                 break;
+            case "clipboard": clipboard(); break;
             case "smb": smb(); break;
             case "diag": diagnostics(); break;
-            // preview, clipboard and switch are reserved for later tasks.
+            // Preview and view switching are reserved for later tasks.
             default: break;
         }
     }
@@ -218,6 +219,26 @@ public final class SettingsPages {
 
     private void link(Object group, String id, String title) {
         row(group, title, null, () -> open(activity, id));
+    }
+
+    private void clipboard() {
+        String title = tr("「すべて」タブでの貼り付け", "Paste in the All tab");
+        java.util.List<String> values = java.util.Arrays.asList("off", "default", "last", "ask");
+        String[] labels = {
+                tr("できない（既定）", "Not allowed (default)"),
+                tr("カテゴリの既定フォルダ", "Category's default folder"),
+                tr("最後に貼り付けたフォルダ", "Last paste folder"),
+                tr("毎回選ぶ", "Ask every time")
+        };
+        Object pref = preference(title, labels[Math.max(0, values.indexOf(ModSettings.pasteAllTab()))]);
+        bridge.setKey(pref, ModSettings.PASTE_ALL_TAB);
+        bridge.setClick(pref, listener(bridge.clickType(), () -> choices(title, labels,
+                Math.max(0, values.indexOf(ModSettings.pasteAllTab())), which -> {
+                    ModSettings.setPasteAllTab(values.get(which));
+                    bridge.setSummary(pref, labels[which]);
+                    app.filesplus.extension.clip.ClipHooks.pasteSettingChanged();
+                })));
+        bridge.addTo(screen, pref);
     }
 
     private Object listener(Class<?> type, Runnable action) {

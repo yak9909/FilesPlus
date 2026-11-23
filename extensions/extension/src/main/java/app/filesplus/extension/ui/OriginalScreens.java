@@ -248,6 +248,11 @@ public final class OriginalScreens {
 
     /** The folder path the picker returned (from onActivityResult's data), or null on any problem. */
     public static String readPicked(Intent result) {
+        return readPicked(result, false);
+    }
+
+    /** Clipboard paste accepts local file results only. */
+    public static String readPicked(Intent result, boolean localOnly) {
         try {
             if (result == null) return null;
             byte[] bytes = ScreenArgs.readExtra(result, ScreenArgs.PICKER_RESULT);
@@ -256,7 +261,13 @@ public final class OriginalScreens {
             if (folder == null) return null;
             String e = folder.getString(K_URI);
             if (e == null || e.isEmpty()) return null;
-            return Uri.parse(e).getPath();
+            Uri uri = Uri.parse(e);
+            if (localOnly && (!"file".equals(uri.getScheme())
+                    || (uri.getAuthority() != null && !uri.getAuthority().isEmpty()))) {
+                return null;
+            }
+            String path = uri.getPath();
+            return !localOnly || (path != null && path.startsWith("/")) ? path : null;
         } catch (Throwable t) {
             DiagLog.e(AREA, "readPicked failed", t);
             return null;

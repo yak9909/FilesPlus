@@ -71,6 +71,7 @@ public final class FolderTabContext {
     private List<String> selectedPaths = Collections.emptyList();
     private int selectionEpoch;
     private String currentKey;
+    private boolean currentAll;
     private String currentFolder;
     private String removedKey;
     private int generation;
@@ -253,12 +254,11 @@ public final class FolderTabContext {
     public void select(String key, boolean all, Bundle descriptor) {
         try {
             currentKey = key;
-            currentFolder = folders.get(key);
-            updateMenu();
+            currentAll = all && key != null;
+            currentFolder = all ? null : folders.get(key);
+            tabChanged();
             if (all || key == null || descriptor == null) {
                 DiagLog.i(AREA, "Tab without folder: key=" + key + ", all=" + all + ", descriptor=" + (descriptor != null));
-                currentFolder = null;
-                updateMenu();
                 return;
             }
             if (folders.containsKey(key) || !resolving.add(key)) return;
@@ -284,7 +284,7 @@ public final class FolderTabContext {
                         resolving.remove(key);
                         folders.put(key, result);
                         if (key.equals(currentKey)) currentFolder = result;
-                        updateMenu();
+                        tabChanged();
                     } catch (Throwable t) { hookError(t); }
                 });
             });
@@ -295,13 +295,21 @@ public final class FolderTabContext {
         return currentFolder;
     }
 
+    public boolean isAllTab() { return currentAll; }
+
+    private void tabChanged() {
+        updateMenu();
+        app.filesplus.extension.clip.ClipHooks.pasteTabChanged(root.get());
+    }
+
     public void tabsChanged() {
         try {
             generation++;
             folders.clear();
             resolving.clear();
             currentFolder = null;
-            updateMenu();
+            currentAll = false;
+            tabChanged();
         } catch (Throwable t) { hookError(t); }
     }
 
