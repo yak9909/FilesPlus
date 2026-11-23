@@ -1,7 +1,7 @@
 {
-  "created_at": "2026-11-12T02:00:48",
-  "description": "## [1.0.0-dev.18](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.17...v1.0.0-dev.18) (2026-11-12)\n\n### ✨ New Features\n\n* Add FilesLook (reuse the app's layouts by name) and a UI sample in diagnostics ([1c5f14d](https://github.com/yak9909/FilesPlus/commit/1c5f14d9e13476a0ad96833b2fa5e2aba2e2bf32))\n* Add the browse core (Location, BrowseSource, LocalSource, ThumbLoader) ([a8a168e](https://github.com/yak9909/FilesPlus/commit/a8a168e9a09234835faee6c75c13073d594f2bf8))\n* Add the destination browser (BrowseActivity, pick mode) with a diagnostics test entry ([2801de1](https://github.com/yak9909/FilesPlus/commit/2801de174bf13a9f9f625cf290ee00021deba850))\n\n### 🐛 Bug Fixes\n\n* Republish the pre-release after the failed dev.18 release run ([9b0ec9c](https://github.com/yak9909/FilesPlus/commit/9b0ec9caf23ab72b4502fa2353bf7c6d0071faf9))",
-  "download_url": "https://github.com/yak9909/FilesPlus/releases/download/v1.0.0-dev.18/patches-1.0.0-dev.18.mpp",
+  "created_at": "2026-11-23T01:54:05",
+  "description": "## [1.0.0-dev.19](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.18...v1.0.0-dev.19) (2026-11-23)\n\n### ✨ New Features\n\n* Move FilesPlus settings into the app's settings screen and remove the look-alike screens ([cc51db4](https://github.com/yak9909/FilesPlus/commit/cc51db4884f31d9194b3ecc3a52fba07a85653a5))\n* Paste the clipboard from both browsers (Task 5b) ([b013584](https://github.com/yak9909/FilesPlus/commit/b01358402c013e91d2ff16109b44d65819b3d082))",
+  "download_url": "https://github.com/yak9909/FilesPlus/releases/download/v1.0.0-dev.19/patches-1.0.0-dev.19.mpp",
   "signature_download_url": "",
-  "version": "1.0.0-dev.18"
+  "version": "1.0.0-dev.19"
 }
