@@ -23,6 +23,21 @@ public final class ScreenArgs {
     private ScreenArgs() {
     }
 
+    /** Serialize through the app's unobfuscated Parcelable wrapper; no protobuf names or reflection on fields. */
+    public static byte[] serialize(Object message) throws ReflectiveOperationException {
+        if (message == null) return null;
+        Class<?> type = Class.forName(CLASS);
+        for (Constructor<?> ctor : type.getConstructors()) {
+            Class<?>[] p = ctor.getParameterTypes();
+            if (p.length == 2 && p[0] == byte[].class && p[1].isInstance(message)) {
+                byte[] result = unwrap((Parcelable) ctor.newInstance(null, message));
+                if (result == null) throw new IllegalStateException("Cannot serialize app message");
+                return result;
+            }
+        }
+        throw new NoSuchMethodException("ProtoParsers wrapper");
+    }
+
     /** Bundle{"protoparsers": new InternalDontUse(bytes, null)}. */
     public static Bundle wrap(byte[] proto) {
         try {

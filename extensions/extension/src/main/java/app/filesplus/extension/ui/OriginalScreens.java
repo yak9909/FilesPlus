@@ -38,6 +38,14 @@ public final class OriginalScreens {
     private static final String PICKER_ACTIVITY = PKG + "advancedbrowsing.picker.AdvancedBrowsingPickerActivity";
     private static final String MEDIA_ACTIVITY = PKG + "documentbrowser.filebrowser.FileBrowserRegularActivity";
 
+    public static boolean isStorageBrowser(Activity host) {
+        return host != null && STORAGE_ACTIVITY.equals(host.getClass().getName());
+    }
+
+    public static boolean isMediaBrowser(Activity host) {
+        return host != null && MEDIA_ACTIVITY.equals(host.getClass().getName());
+    }
+
     // kqg (a folder): field numbers.
     private static final int K_NAME = 1;
     private static final int K_URI = 2;
@@ -203,16 +211,20 @@ public final class OriginalScreens {
      * {@code dependsOn(openStackPatch)} (app.filesplus.patches.screens), so the user cannot untick the hook.
      */
     public static boolean openStorage(Activity from, List<FolderRef> stack, boolean replace) {
+        return openStorage(from, stack, replace, false);
+    }
+
+    public static boolean openStorage(Activity from, List<FolderRef> stack, boolean replace, boolean shortToast) {
         try {
             if (stack != null && stack.size() > 1 && !stackHookPresent()) {
                 return fail(from, "refused: the \"Open folder stack\" patch is not applied", null,
-                        "「Open folder stack」パッチが当たっていません", "The \"Open folder stack\" patch is not applied");
+                        "「Open folder stack」パッチが当たっていません", "The \"Open folder stack\" patch is not applied", shortToast);
             }
             byte[] hut = buildHut(from, stack, MODE_BROWSE, ENTRY_FROM_LIST);
             byte[] args = new ProtoNode().setMessage(1, ProtoNode.decode(hut)).encode();
-            return launch(from, STORAGE_ACTIVITY, args, false, 0, replace);
+            return launch(from, STORAGE_ACTIVITY, args, false, 0, replace, shortToast);
         } catch (Throwable t) {
-            return fail(from, "openStorage failed", t);
+            return fail(from, "openStorage failed", t, shortToast);
         }
     }
 
@@ -221,15 +233,19 @@ public final class OriginalScreens {
      * (case-insensitive match; the first tab with that name wins).
      */
     public static boolean openMedia(Activity from, Category c, String tabNameOrNull, boolean replace) {
+        return openMedia(from, c, tabNameOrNull, replace, false);
+    }
+
+    public static boolean openMedia(Activity from, Category c, String tabNameOrNull, boolean replace, boolean shortToast) {
         try {
             int isd = mediaCategory(c);
-            if (isd == 0) return fail(from, "openMedia: unsupported category " + c, null);
+            if (isd == 0) return fail(from, "openMedia: unsupported category " + c, null, shortToast);
             ProtoNode jcp = new ProtoNode();
             if (tabNameOrNull != null && !tabNameOrNull.isEmpty()) jcp.setString(J_TAB, tabNameOrNull);
             jcp.setVarint(J_CATEGORY, isd).setVarint(J_ENTRY, 1);
-            return launch(from, MEDIA_ACTIVITY, jcp.encode(), false, 0, replace);
+            return launch(from, MEDIA_ACTIVITY, jcp.encode(), false, 0, replace, shortToast);
         } catch (Throwable t) {
-            return fail(from, "openMedia failed", t);
+            return fail(from, "openMedia failed", t, shortToast);
         }
     }
 
@@ -240,7 +256,7 @@ public final class OriginalScreens {
             List<FolderRef> stack = stackFor(from, internal);
             byte[] hut = buildHut(from, stack, MODE_MOVE, 0);
             byte[] args = new ProtoNode().setMessage(1, ProtoNode.decode(hut)).encode();
-            return launch(from, PICKER_ACTIVITY, args, true, requestCode, false);
+            return launch(from, PICKER_ACTIVITY, args, true, requestCode, false, false);
         } catch (Throwable t) {
             return fail(from, "pickFolder failed", t);
         }
@@ -340,14 +356,14 @@ public final class OriginalScreens {
     // ---- validation and launch ----
 
     private static boolean launch(Activity from, String className, byte[] args, boolean forResult, int requestCode,
-                                  boolean replace) {
+                                  boolean replace, boolean shortToast) {
         String problem = validate(from, className, args);
-        if (problem != null) return fail(from, "refused " + simple(className) + ": " + problem, null);
+        if (problem != null) return fail(from, "refused " + simple(className) + ": " + problem, null, shortToast);
         Intent intent = new Intent();
         intent.setComponent(new ComponentName(from, className));
         intent.putExtra(ScreenArgs.EXTRA, ScreenArgs.wrap(args));
         if (from.getPackageManager().resolveActivity(intent, 0) == null) {
-            return fail(from, "refused " + simple(className) + ": activity not declared in the manifest", null);
+            return fail(from, "refused " + simple(className) + ": activity not declared in the manifest", null, shortToast);
         }
         DiagLog.i(AREA, "launch " + simple(className) + "\n" + ProtoNode.decode(args).dump());
         if (forResult) {
@@ -455,14 +471,19 @@ public final class OriginalScreens {
     }
 
     private static boolean fail(Activity from, String message, Throwable t) {
-        return fail(from, message, t, "画面を開けませんでした（診断ログを確認してください）",
-                "Could not open the screen (see the diagnostic log)");
+        return fail(from, message, t, false);
     }
 
-    private static boolean fail(Activity from, String message, Throwable t, String ja, String en) {
+    private static boolean fail(Activity from, String message, Throwable t, boolean shortToast) {
+        return fail(from, message, t, "画面を開けませんでした（診断ログを確認してください）",
+                "Could not open the screen (see the diagnostic log)", shortToast);
+    }
+
+    private static boolean fail(Activity from, String message, Throwable t, String ja, String en, boolean shortToast) {
         DiagLog.e(AREA, message, t);
         try {
-            Toast.makeText(from, SettingsHooks.isJapanese(from) ? ja : en, Toast.LENGTH_LONG).show();
+            Toast.makeText(from, SettingsHooks.isJapanese(from) ? ja : en,
+                    shortToast ? Toast.LENGTH_SHORT : Toast.LENGTH_LONG).show();
         } catch (Throwable ignored) {
             // nothing more to do
         }

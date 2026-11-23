@@ -240,6 +240,8 @@ val settingsInjectionPatch = bytecodePatch(
             it.parameterTypes == listOf("[Ljava/lang/CharSequence;", "I", CLICK) && it.returnType == "V"
         }.also { check(it.size == 1) { "Settings: expected one single-choice setter, found ${it.size}" } }.single()
 
+        println("Switch view fingerprint native single-choice builder: 1 match ($singleChoice)")
+
         owner.interfaces.add(BRIDGE)
         owner.fields.add(MutableField(ImmutableField(owner.type, "filesPlusScreen", OBJ,
             AccessFlags.PRIVATE.value, null, emptySet(), emptySet())))
@@ -349,13 +351,28 @@ val settingsInjectionPatch = bytecodePatch(
             move-result-object v0
             return-object v0
         """.trimIndent())
-        bridge("choices", listOf(CTX, TEXT, "[Ljava/lang/CharSequence;", "I", CLICK), DIALOG, locals = 3, body = """
+        val choiceParams = listOf(CTX, TEXT, "[Ljava/lang/CharSequence;", "I", CLICK)
+        val pages = mutableClassDefBy(PAGES)
+        val stub = pages.methods.single {
+            it.name == "nativeChoices" && it.parameterTypes == choiceParams && it.returnType == DIALOG
+        }
+        check(pages.methods.remove(stub))
+        val nativeChoices = MutableMethod(ImmutableMethod(PAGES, stub.name,
+            choiceParams.map { ImmutableMethodParameter(it, emptySet(), null) }, DIALOG, stub.accessFlags,
+            emptySet(), emptySet(), MutableMethodImplementation(7)))
+        nativeChoices.addInstructions(0, """
             new-instance v0, $dialogType
             const/4 v1, 0x0
-            invoke-direct {v0, p1, v1}, $constructor
-            invoke-virtual {v0, p2}, $dialogTitle
-            invoke-virtual {v0, p3, p4, p5}, $singleChoice
+            invoke-direct {v0, p0, v1}, $constructor
+            invoke-virtual {v0, p1}, $dialogTitle
+            invoke-virtual {v0, p2, p3, p4}, $singleChoice
             invoke-virtual {v0}, $create
+            move-result-object v0
+            return-object v0
+        """.trimIndent())
+        pages.methods.add(nativeChoices)
+        bridge("choices", choiceParams, DIALOG, body = """
+            invoke-static/range {p1 .. p5}, $nativeChoices
             move-result-object v0
             return-object v0
         """.trimIndent())
