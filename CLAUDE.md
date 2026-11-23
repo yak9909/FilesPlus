@@ -11,7 +11,8 @@ Talk to the user in Japanese.
 - Keep the original UI design. New UI only as items in existing menus, long-press, or on-demand bottom sheets.
 ## Repository / release
 - GitHub: https://github.com/yak9909/FilesPlus (public). Use `gh` for GitHub operations (account `yak9909`).
-- Work on `dev`; merge `dev` → `main` for stable (no squash). Semantic commits: `feat:` / `fix:` create releases (CI `release.yml`), `chore:` does not.
+- Work on `dev`; merge `dev` → `main` for stable (no squash).
+- **Pushing `dev` needs no user confirmation** (user, 2026-11-23), even when `feat:`/`fix:` commits make a release. Push after a task is reviewed, committed and merged. Merging into `main` (stable) is still the user's call. Semantic commits: `feat:` / `fix:` create releases (CI `release.yml`), `chore:` does not.
 - Never hand-edit generated files: `patches-list.json`, `patches-bundle.json`, `CHANGELOG.md`.
 - Build: `./gradlew buildAndroid` → `patches/build/libs/patches-*.mpp` (needs JDK 21: `C:\Program Files\Java\jdk-21.0.3`; jdk-26 breaks tools; Android SDK; GitHub token with `read:packages`).
 
@@ -23,9 +24,9 @@ Talk to the user in Japanese.
 - `analysis/tools/` — jadx, apktool.jar.
 - Obfuscated names (e.g. `kwd`, `jpx`, `kxo`, `imh`) are valid **only for versionCode 2081362**. In patches, locate code with Morphe fingerprints (strings, resource IDs, unobfuscated classes), never by obfuscated names.
 
-## Current rule (2026-11-19, user instruction): Claude models only — do NOT use Codex (neither codex-bridge nor the CLI) until the user says otherwise. Workers = Claude subagents per "Workers: Claude subagents" below; reviews = Opus 5.5.
+## Current rule (2026-11-20, user instruction): implementation workers = **codex-bridge, lender `taiyo`, model `gpt-6.2-sol`** (since 2026-11-23; effort per task); reviews = Opus 5.5 subagent. (Replaces the 2026-11-19 "Claude models only" rule.)
 
-## Workers: Codex via codex-bridge (2026-11-18 rule; SUSPENDED by the rule above)
+## Workers: Codex via codex-bridge (2026-11-18 rule; active again with lender taiyo)
 - Implementation workers: **Codex through the `codex-bridge` MCP** (`send_task` → `get_status(wait_sec=50)` → `get_result`; read its `get_guide` once per session). Do NOT launch the Codex CLI (`scripts/codex-worker.sh`, `codex:codex-rescue`).
 - Shared folders: `E:/Projects/ModdedFiles-wt` (write — worker worktrees) and `E:/Projects/ModdedFiles` (read). Use absolute paths in prompts (the bridge's main folder is another project).
 - **Reviews: always an Opus 5.5 subagent** (Agent tool, `model: opus`), never Codex.

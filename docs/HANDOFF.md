@@ -4,10 +4,30 @@
 
 **再開したら、作業に入る前に必ず superpowers のスキルを Skill ツールで読み込むこと（ユーザー指示 2026-11-12。「superpowers に従っている感じがしない」との指摘）。** 最低限 `superpowers:using-superpowers` を読み、そのうえで作業に合うものを読み込んで従う（調査・設計のやり直し → `superpowers:brainstorming`／計画書 → `superpowers:writing-plans`／実装の配分 → `superpowers:subagent-driven-development`／レビュー → `superpowers:requesting-code-review`・`superpowers:receiving-code-review`／完了の判断 → `superpowers:verification-before-completion`）。「覚えているから読まなくてよい」とはしない。CLAUDE.md のユーザールールはスキルより優先。
 
-## 進行中（2026-11-19）— 計画 `docs/plans/2026-11-12-original-screens.md` を実行中
+## 進行中（2026-11-20）
+- **Task 4 済み**（dev ca5a204 chore、merge 72a059a。未 push）。taiyo（codex-bridge）が直し 2 回、Opus の再レビューで承認。Minor は ledger（M1〜M16、R1〜R9）。
+- **Task 5 は 5a（切り取りの入口）と 5b（下端の貼り付けボタン・貼り付け先・設定ページ、feat）に分けた。**
+- **Task 5a 済み（2026-11-23、dev d3861ea chore、merge 42ed5b9。未 push）**。パッチ "Clipboard"（9 パッチ全部 Applied）。Opus レビュー → 直し 1 回 → 再レビューで承認。Minor は ledger。
+- **Task 6 済み（2026-11-23、dev 5cd589d feat、merge ca202f1、push 済み）**。taiyo の直し 1 回（t20261123-144424-7）→ 自分で task-6-verify.ps1（BUILD OK、10 Applied、全 fingerprint 1 match、自己テスト全 PASS、dex 53,767）→ Opus 再レビュー承認。Minor: `ViewSwitch.java:82` 生パスに `%XX` を含む名前を誤ってデコード／`SettingsInjectionPatch.kt:243` の fingerprint の行名が "Switch view"。実機で見る点: 切り替えのメニュー、ボリュームの一番上からの切り替え（「すべて」タブ）、戻るの動き。**次は計画の Task 7（SMB をストレージブラウザで、P4）**。
+- （経緯）**（2026-11-23 11:20 利用枠 5h 81% で中断。リセット 14:20）Task 6（表示の切り替え）は実装済み・未コミット**（worktree `../ModdedFiles-wt/screens`）。taiyo（t20261123-105427-5、gpt-6.2-sol/high）が実装、自分で検証済み（BUILD OK、10 Applied、fingerprint 37 本すべて 1 match、自己テスト全部 PASS、dex 53,753）。Opus レビューは承認だが Important 1 件（I1: 画面の持ち主の Activity を許可リストで確かめていない → 置き換えで別の画面を閉じるおそれ）と Minor 5 件。
+  **次の1手: 直しの指示書 `task-6-fix1-brief.md`（書き済み）を taiyo に `continue_task_id` t20261123-105427-5（model gpt-6.2-sol、effort high）で送る → 自分で `task-6-verify.ps1` → 小さい差分の再レビュー → `feat:` でコミット（`git -c core.autocrlf=true add`）→ dev にマージ → push（確認不要）。** 詳細は ledger。
+- dev は 2329214 まで push 済み（2026-11-23、ユーザー: push は確認不要）。main は未更新（安定版のマージはユーザーが決める）。
+- **Task 5b 済み（2026-11-23、dev b013584 feat、merge 2329214）**。taiyo（gpt-6.2-sol/xhigh）が実装、Opus レビューで承認（Critical・Important なし、Minor N1〜N9 は ledger）。**Task 5（P2）完了。push するとリリースが出るので、push の前にユーザーに確認する。** 実機で見る点: 下端のボタン欄の 2 通りの見た目（N3: メディアブラウザで 2 個ボタン版が出ないかもしれない）、上の︙の項目、「毎回選ぶ」の移動画面から戻ったとき、貼り付け後の一覧の更新。次は計画の Task 6（表示の切り替え、P3）。
+- コミットの注意: worktree の一部のファイルは作業ツリーが CRLF（以前からの改行の差）。add は `git -c core.autocrlf=true add <files>` で LF にして載せる。PowerShell の `git diff --cached --stat` は大きく見えるが、Bash の git で確かめると正しい。
+- （済み）Task 5b を taiyo に送った（t20261123-092622-4）。以下は送る前のメモ。
+- （済み）Task 5b の指示書を書いて taiyo に送る（新しい依頼。lender taiyo、**model gpt-6.2-sol**、effort xhigh。続きの依頼では model 指定が効かず前のモデルのままだったので、終わったら実際のモデルを確かめる）。指示書 `task-5b-brief.md` はまだ無い。中身の要点（メインが決めたこと）:
+  - 下端のボタン欄: クリップボードが空でないあいだ両ブラウザの `main_coordinator` に足す。FAB が `create_new_folder_expressive` なら picker の `button_section`（「クリア」＋「ここに貼り付け（n 件）」）、でなければ `framed_single_button_view`（1 個、「クリア」は上の︙）。一覧の下の余白を足し FAB を上げる（P0 §2、DESIGN §5.12.2「切り取り中の見せ方」）。`Clipboard.addListener` で出し入れ。
+  - 貼り付け先: ストレージブラウザ＝今のフォルダ（今のフォルダを取るフックが要る。proto をバイト列で渡し `ProtoNode` で読む。P0 §1.3）、メディアブラウザのフォルダタブ＝`FolderTabContext` の解決、「すべて」タブ＝`paste.allTab`（`PasteTarget.ofAllTab`）。SMB は貼り付け先にしない。
+  - 押せないとき: ボタンを押せない状態にし、ラベルを `PasteRules.message` の短い理由にする（Ruling。元の部品のまま）。上の︙の予備: 「貼り付け（n 件）」「クリップボードをクリア」。
+  - `paste.allTab = ask`（ledger M2）: 元の picker を開く。結果を受けるため拡張に画面を持たない透明の中継 Activity（`startActivityForResult` → `OriginalScreens.readPicked`）を置く（Ruling。見た目は増えない）。
+  - 実行は `MoveQueue.paste(app, state, dest, createIfMissing, callback)`。終わったら完全なパスと件数を知らせる（元に戻すは無し）。
+  - 設定ページ `clipboard` に `paste.allTab`（できない（既定）／カテゴリの既定フォルダ／最後に貼り付けたフォルダ／毎回選ぶ）を既存の単一選択ダイアログで。
+  - 診断にフックの入り具合の行。検証: ビルド、`build/verify-out/verify.ps1`（9 Applied、rules ALL PASS）。コミットは `feat:`（push するとリリース。push の前にユーザーに確認）。
+
+## （経緯）2026-11-19 — 計画 `docs/plans/2026-11-12-original-screens.md` を実行中
 - **今の決まり（2026-11-19 ユーザー）: Codex は使わず Claude のモデルだけ**（実装 Sonnet、レビュー Opus 5.5）。進み具合の正本は worktree の ledger `../ModdedFiles-wt/screens/.superpowers/sdd/2026-11-12-original-screens/progress.md`（指示書・報告・Minor の一覧もそこ）。
 - **Task 3 済み（dev cc51db4 feat、merge ce7e3fc。未 push）**: Mod 設定は元の設定画面へ（パッチ "FilesPlus settings"、`SettingsActivity` の singleTask を外す）。自前の画面と "Move queue in preview"・"Move to current tab" は削除。選択を取るフックは隠しパッチ `foldertabs/TabSelectionHookPatch.kt`（Task 5 は直接 dependsOn すること）。Minor 11 件は ledger。**push は未確認**（feat なので push するとリリースが出る。P1 は単独で出してよいとユーザー決定済みだが、push の前にユーザーに確認する）。
-- 次: Task 4（クリップボードと貼り付けのコア）。
+- **（2026-11-19 利用枠の見張りで中断）Task 4（クリップボードと貼り付けのコア）は実装済み・未コミット**（worktree `../ModdedFiles-wt/screens`）。Opus のレビュー: Critical なし、Important 3（I1 診断の試験が「最後に貼り付けたフォルダ」を上書き、I2 途中で止まったときの 0 バイトの予約ファイルに気づけない、I3 フォルダが 1 件・0 バイトと数えられ 50 件/100MB の止めが効かない → 決定: フォルダは中身で数える）。直しは途中（I2・I3 はコードあり・未試験、I1 の配線・試験の追加・診断の行が残り）。**次の1手（2026-11-20 更新: 実装は codex-bridge の貸し手 taiyo、レビューは Opus 5.5）**: taiyo に指示書 `../ModdedFiles-wt/screens/.superpowers/sdd/2026-11-12-original-screens/task-4-fix1-finish-brief.md` で直しの残りを頼む（Sonnet の実装者 a2bffda1c68b8b5d7 は使わない） → ビルド＋ harness ＋ JVM の自己テスト → Opus の再レビュー → コミット（Task 4 は内部の部品なので `chore:`）・マージ → Task 5。残りの手順は ledger と `task-4-report.md` の「Fix round 1 (PARTIAL)」。
 
 ## （経緯）2026-11-13 の進行中メモ
 - Task 0・1（P0 調査）済み: 報告 `docs/research/2026-11-12-original-screens-p0.md`、DESIGN 0.14 に反映。ユーザー決定: ゴミ箱は「FilesPlus」タブを足す形。
