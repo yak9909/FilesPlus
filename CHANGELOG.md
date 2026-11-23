@@ -1,3 +1,9 @@
+## [1.0.0-dev.23](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.22...v1.0.0-dev.23) (2026-11-23)
+
+### ✨ New Features
+
+* Show empty folder tabs only in Downloads, judged by real contents ([dcd46b9](https://github.com/yak9909/FilesPlus/commit/dcd46b93df11f0d69d238803f666babeb6afb820))
+
 ## [1.0.0-dev.22](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.21...v1.0.0-dev.22) (2026-11-23)
 
 ### ✨ New Features
