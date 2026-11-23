@@ -4,6 +4,7 @@ import app.filesplus.patches.misc.modKitIntegrationPatch
 import app.filesplus.patches.shared.Constants
 import app.morphe.patcher.extensions.InstructionExtensions.addInstructions
 import app.morphe.patcher.extensions.InstructionExtensions.addInstructionsWithLabels
+import app.morphe.patcher.patch.BytecodePatchContext
 import app.morphe.patcher.patch.PatchException
 import app.morphe.patcher.patch.bytecodePatch
 import app.morphe.patcher.util.proxy.mutableTypes.MutableClass
@@ -129,6 +130,9 @@ val previewMultiSelectPatch = bytecodePatch(
             }) { "register v$register is overwritten before inflate" }
         }
         need(menuRegister != peerRegister) { "peer and menu share a register" }
+
+        val menuEligibility = previewMenuEligibility(indexed, current, menuCode.take(inflateIndex))
+        installPreviewLongPress(peer, current, bitsRef!!, idRef!!, menuEligibility)
 
         // Reads the current file for both bridges: v0 root view, v2/v3 id, v4 has-id, v5 entry.
         val loadCurrent = """
@@ -260,6 +264,188 @@ val previewMultiSelectPatch = bytecodePatch(
             (constructor as MutableMethod).addInstructions(index, "invoke-static/range {p0 .. p0}, $LIST_HANDOFF->registerModel(Ljava/lang/Object;)V")
         }
     }
+}
+
+/** Reads the current pager row and runs the same two exclusion checks as native menu inflation. */
+private fun previewMenuEligibility(indexed: Method, current: Method, beforeInflate: List<Instruction>): String {
+    val index = current.code().single { it.opcode == Opcode.IGET }.ref() as FieldReference
+    val lookup = indexed.code().dropWhile { it.opcode != Opcode.IGET_OBJECT }
+    need(lookup.take(14).map { it.opcode } == listOf(
+        Opcode.IGET_OBJECT, Opcode.IGET_OBJECT, Opcode.IGET_OBJECT, Opcode.CHECK_CAST,
+        Opcode.INVOKE_VIRTUAL, Opcode.MOVE_RESULT_OBJECT, Opcode.CHECK_CAST, Opcode.INVOKE_VIRTUAL,
+        Opcode.MOVE_RESULT, Opcode.SUB_INT_2ADDR, Opcode.INVOKE_INTERFACE, Opcode.MOVE_RESULT_OBJECT,
+        Opcode.CHECK_CAST, Opcode.IGET_OBJECT,
+    )) { "indexed preview row lookup" }
+    val window = lookup[0].ref() as FieldReference
+    val rows = lookup[1].ref() as FieldReference
+    val bounds = lookup[2].ref() as FieldReference
+    val boundsType = (lookup[3].ref() as TypeReference).type
+    val start = lookup[4].ref() as MethodReference
+    val intValue = lookup[7].ref() as MethodReference
+    val rowAt = lookup[10].ref() as MethodReference
+    val rowType = (lookup[12].ref() as TypeReference).type
+    need(index.definingClass == current.definingClass && index.type == "I" &&
+        window.definingClass == indexed.definingClass && rows.definingClass == window.type &&
+        bounds.definingClass == window.type && start.definingClass == boundsType &&
+        intValue.toString() == "Ljava/lang/Integer;->intValue()I" &&
+        rowAt.toString() == "$LIST->get(I)Ljava/lang/Object;"
+    ) { "indexed preview row references" }
+
+    val checks = beforeInflate.withIndex().mapNotNull { (i, instruction) ->
+        (instruction.ref() as? MethodReference)?.takeIf {
+            instruction.opcode == Opcode.INVOKE_STATIC && it.returnType == "Z" &&
+                beforeInflate.getOrNull(i + 1)?.opcode == Opcode.MOVE_RESULT &&
+                beforeInflate.getOrNull(i + 2)?.opcode == Opcode.IF_NEZ
+        }
+    }
+    val rowExcluded = checks.filter {
+        it.definingClass == indexed.definingClass && it.parameterTypes == listOf(rowType)
+    }.longPressMatch("native menu row exclusion")
+    val entryExcluded = checks.filter {
+        it.parameterTypes == listOf(indexed.returnType)
+    }.longPressMatch("native menu trash exclusion")
+    return """
+        iget-object v0, p0, $window
+        iget-object v1, v0, $rows
+        check-cast v1, $LIST
+        iget-object v0, v0, $bounds
+        check-cast v0, $boundsType
+        invoke-virtual {v0}, $start
+        move-result-object v0
+        check-cast v0, Ljava/lang/Integer;
+        invoke-virtual {v0}, $intValue
+        move-result v0
+        iget v2, p0, $index
+        sub-int/2addr v2, v0
+        invoke-interface {v1, v2}, $rowAt
+        move-result-object v0
+        check-cast v0, $rowType
+        invoke-static {v0}, $rowExcluded
+        move-result v0
+        if-nez v0, :unhandled
+        invoke-static {v4}, $entryExcluded
+        move-result v0
+        if-nez v0, :unhandled
+    """.trimIndent()
+}
+
+private fun BytecodePatchContext.installPreviewLongPress(
+    peer: MutableClass, current: MethodReference, bits: FieldReference, id: FieldReference,
+    menuEligibility: String,
+) {
+    val dragMethods = mutableListOf<Method>()
+    classDefForEach { cls ->
+        cls.methods.filterTo(dragMethods) {
+            AccessFlags.STATIC.isSet(it.accessFlags) && it.returnType == "V" &&
+                it.parameterTypes.size == 7 && it.parameterTypes.first() == VIEW &&
+                it.string("drag and drop logging") && it.string("files-source") && it.string("parent-folder-uri")
+        }
+    }
+    val drag = dragMethods.longPressMatch("native drag starter")
+    val entryPoint = drag.parameterTypes[3].toString()
+    val safeName = "SAFE_FOLDER_BROWSER"
+    val entryPoints = classDefBy(entryPoint).methods.filter {
+        it.name == "<clinit>" && it.string(safeName)
+    }.longPressMatch("entry-point enum initializer").code()
+    val safeNameIndex = entryPoints.indexOfFirst { (it.ref() as? StringReference)?.string == safeName }
+    val safeFolder = entryPoints.drop(safeNameIndex + 1).firstNotNullOf { instruction ->
+        (instruction.ref() as? FieldReference)?.takeIf {
+            instruction.opcode == Opcode.SPUT_OBJECT && it.definingClass == entryPoint && it.type == entryPoint
+        }
+    }
+
+    val handlers = mutableListOf<Method>()
+    classDefForEach { cls ->
+        cls.methods.filterTo(handlers) { method ->
+            !AccessFlags.STATIC.isSet(method.accessFlags) && method.parameterTypes.size == 1 &&
+                method.returnType.startsWith("L") && method.calls().any { it == drag } &&
+                method.calls().any { it == current } && method.code().any {
+                    it.opcode == Opcode.SGET_OBJECT && it.ref() == safeFolder
+                }
+        }
+    }
+    val match = handlers.longPressMatch("preview event handler")
+    val handler = mutableClassDefBy(match.definingClass).methods.single { it == match }
+    val code = handler.code()
+    val dragIndex = code.indices.single { code[it].ref() == drag }
+    val safeIndex = code.indices.single { code[it].opcode == Opcode.SGET_OBJECT && code[it].ref() == safeFolder }
+    val safeCheck = code[safeIndex + 1]
+    val acknowledge = code[dragIndex + 1]
+    val handled = acknowledge.ref() as? FieldReference
+    need(acknowledge.opcode == Opcode.SGET_OBJECT && handled?.type == handler.returnType &&
+        code[dragIndex + 2].opcode == Opcode.RETURN_OBJECT &&
+        (code[dragIndex + 2] as OneRegisterInstruction).registerA ==
+            (acknowledge as OneRegisterInstruction).registerA
+    ) { "preview drag acknowledgment" }
+    val addresses = code.runningFold(0) { address, instruction -> address + instruction.codeUnits }
+    need(safeCheck.opcode == Opcode.IF_EQ &&
+        (safeCheck as TwoRegisterInstruction).registerB == (code[safeIndex] as OneRegisterInstruction).registerA &&
+        addresses[safeIndex + 1] + (safeCheck as OffsetInstruction).codeOffset == addresses[dragIndex + 1]
+    ) { "Safe folder guard must bypass the preview drag block" }
+
+    val read = (safeIndex + 2 until dragIndex).single { code[it].ref() == current }
+    val viewCall = code[read + 2].ref() as? MethodReference
+    val listCall = code[read + 4].ref() as? MethodReference
+    need(code[read].opcode == Opcode.INVOKE_VIRTUAL && code[read + 1].opcode == Opcode.MOVE_RESULT_OBJECT &&
+        code[read + 2].opcode == Opcode.INVOKE_VIRTUAL && viewCall?.returnType == VIEW &&
+        viewCall.parameterTypes.isEmpty() && code[read + 3].opcode == Opcode.MOVE_RESULT_OBJECT &&
+        code[read + 4].opcode == Opcode.INVOKE_STATIC && listCall?.returnType == drag.parameterTypes[1] &&
+        code[read + 5].opcode == Opcode.MOVE_RESULT_OBJECT
+    ) { "preview drag file, view, and singleton list sequence" }
+
+    val peerReg = (code[read] as FiveRegisterInstruction).registerC
+    val entryReg = (code[read + 1] as OneRegisterInstruction).registerA
+    val viewReg = (code[read + 3] as OneRegisterInstruction).registerA
+    val listInvoke = code[read + 4] as FiveRegisterInstruction
+    val scratch = (code[read + 5] as OneRegisterInstruction).registerA
+    val impl = handler.implementation!!
+    val parameterRegisters = 1 + handler.parameterTypes.size + handler.parameterTypes.count { it == "J" || it == "D" }
+    need(listInvoke.registerCount == 1 && listInvoke.registerC == entryReg &&
+        listOf(peerReg, entryReg, viewReg).all { it <= 15 && it != scratch } &&
+        scratch < impl.registerCount - parameterRegisters && impl.tryBlocks.none {
+            addresses[read + 4] in it.startCodeAddress until (it.startCodeAddress + it.codeUnitCount)
+        }
+    ) { "preview drag registers or try range" }
+
+    val bridge = peer.bridge("modKitPreviewLongPress", listOf(VIEW, current.returnType), "Z", 8, """
+        move-object v4, p2
+        iget v3, v4, $bits
+        const v1, $MEDIA_ID_BIT
+        and-int/2addr v3, v1
+        if-nez v3, :has_id
+        const/4 v0, 0x0
+        return v0
+        :has_id
+        $menuEligibility
+        move-object v0, p1
+        iget-wide v1, v4, $id
+        const/4 v3, 0x1
+        invoke-static/range {v0 .. v4}, $HOOK->onLongPress(${VIEW}JZLjava/lang/Object;)Z
+        move-result v0
+        return v0
+        :unhandled
+        const/4 v0, 0x0
+        return v0
+    """.trimIndent())
+
+    // Reuse the file and root the app just looked up. The native list call does not read
+    // the scratch register and its move-result overwrites it on the fallback path.
+    handler.addInstructionsWithLabels(read + 4, """
+        invoke-virtual {v$peerReg, v$viewReg, v$entryReg}, $bridge
+        move-result v$scratch
+        if-eqz v$scratch, :original
+        sget-object v$scratch, $handled
+        return-object v$scratch
+    """.trimIndent(), ExternalLabel("original", code[read + 4]))
+
+    mutableClassDefBy(HOOK).methods.single {
+        it.name == "longPressInstalled" && it.parameterTypes.isEmpty() && it.returnType == "Z"
+    }.addInstructions(0, "const/4 v0, 0x1\nreturn v0")
+}
+
+private fun <T : MethodReference> List<T>.longPressMatch(label: String): T {
+    need(size == 1) { "Preview long-press fingerprint $label: expected 1 match, got $size" }
+    return single().also { println("Preview long-press fingerprint $label: 1 match ($it)") }
 }
 
 private fun isPreviewMenuMethod(method: Method) =

@@ -3,9 +3,11 @@ package app.filesplus.extension.preview;
 import android.app.Activity;
 import android.content.Context;
 import android.content.ContextWrapper;
+import android.content.SharedPreferences;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.view.HapticFeedbackConstants;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
@@ -19,8 +21,10 @@ import java.lang.ref.WeakReference;
 
 import app.filesplus.extension.DiagLog;
 import app.filesplus.extension.ModKit;
+import app.filesplus.extension.ModSettings;
 import app.filesplus.extension.clip.ClipHooks;
 import app.filesplus.extension.move.MoveQueue;
+import app.filesplus.extension.smb.SmbRoots;
 
 /**
  * Entry points called from the smali bridges of the "Multi-select in preview" patch.
@@ -43,13 +47,40 @@ public final class PreviewHooks {
         DiagLog.e(AREA, "Preview hook failed", t);
     }
 
+    public static boolean longPressInstalled() {
+        return false; // Replaced when the patch is applied.
+    }
+
+    /** Called with the current file from the native preview drag branch. */
+    public static boolean onLongPress(View root, long id, boolean hasId, Object entry) {
+        try {
+            if (root == null || !hasId || entry == null) return false;
+            SharedPreferences prefs = ModSettings.prefs();
+            if (prefs == null || !prefs.getBoolean(ModSettings.PREVIEW_LONG_PRESS_SELECT,
+                    ModSettings.DEFAULT_PREVIEW_LONG_PRESS_SELECT) || SmbRoots.isFile(entry)) {
+                return false;
+            }
+            if (!onMenuItem(root, SELECT_ITEM, id, true, entry)) return false;
+            try {
+                root.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+            } catch (Throwable t) {
+                // Selection already succeeded, so a feedback failure must not start a drag.
+                hookError(t);
+            }
+            return true;
+        } catch (Throwable t) {
+            hookError(t);
+            return false;
+        }
+    }
+
     /**
      * Called right after the app inflated its preview menu (never for entries where the app
      * returns before inflating). {@code hasId} is false when the file has no MediaStore id.
      */
     public static void onMenuCreated(View root, Menu menu, long id, boolean hasId, Object entry) {
         try {
-            if (app.filesplus.extension.smb.SmbRoots.isFile(entry)) return;
+            if (SmbRoots.isFile(entry)) return;
             if (menu == null) return;
             Context context = root != null ? root.getContext() : ModKit.context();
             ListHandoff.notePreviewActivity(activity(context));

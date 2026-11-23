@@ -23,6 +23,7 @@ import android.widget.Toast;
 import app.filesplus.extension.DiagLog;
 import app.filesplus.extension.ModKit;
 import app.filesplus.extension.ModSettings;
+import app.filesplus.extension.preview.PreviewHooks;
 import app.filesplus.extension.browse.Category;
 import app.filesplus.extension.browse.ViewSwitch;
 import app.filesplus.extension.clip.PasteSelfTest;
@@ -146,6 +147,7 @@ public final class SettingsPages {
 
     private static boolean hasItems(String id) {
         return "tabs".equals(id) || "skip".equals(id) || "clipboard".equals(id)
+                || ("preview".equals(id) && PreviewHooks.longPressInstalled())
                 || ("switch".equals(id) && ViewSwitch.installed()) || "smb".equals(id) || "diag".equals(id);
     }
 
@@ -186,6 +188,14 @@ public final class SettingsPages {
                         tr("ダブルタップの巻き戻しで、戻す秒数より手前にいるときは先頭へ戻ります。",
                                 "A double-tap rewind closer to the start than the skip duration goes to the start."),
                         ModSettings.SKIP_REWIND_TO_START, ModSettings.DEFAULT_SKIP_REWIND_TO_START);
+                break;
+            case "preview":
+                if (PreviewHooks.longPressInstalled()) {
+                    toggle(screen, tr("長押しで選択", "Long-press to select"),
+                            tr("プレビュー中の長押しでファイルを選択・解除",
+                                    "Long-press in the preview selects or deselects the file"),
+                            ModSettings.PREVIEW_LONG_PRESS_SELECT, ModSettings.DEFAULT_PREVIEW_LONG_PRESS_SELECT);
+                }
                 break;
             case "clipboard": clipboard(); break;
             case "switch": if (ViewSwitch.installed()) viewSwitch(); break;
@@ -430,6 +440,9 @@ public final class SettingsPages {
         }
         row(screen, tr("クリップボードのフック", "Clipboard hooks"),
                 app.filesplus.extension.clip.ClipHooks.installedHooks(), null);
+        row(screen, tr("プレビューの長押しフック", "Preview long-press hook"),
+                PreviewHooks.longPressInstalled() ? tr("適用済み", "Installed") : tr("未適用", "Not installed"),
+                null);
         row(screen, tr("表示の切り替えのフック", "Switch view hooks"),
                 ViewSwitch.hookStatus(japanese), null);
         row(screen, tr("圧縮ファイルのフック", "Archives filter hooks"),

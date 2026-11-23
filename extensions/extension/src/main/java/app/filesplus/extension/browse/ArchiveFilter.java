@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.WeakHashMap;
 
 import app.filesplus.extension.DiagLog;
+import app.filesplus.extension.settings.SettingsHooks;
 
 /** Uses the Downloads pager's native collection IDs to give each tab its own chip state. */
 public final class ArchiveFilter {
@@ -122,8 +123,9 @@ public final class ArchiveFilter {
             View chip = LayoutInflater.from(root.getContext()).inflate(layoutId, group, false);
             Checkable checked = (Checkable) chip;
             String original = state.originalKey(query);
-            boolean japanese = "ja".equals(root.getResources().getConfiguration().getLocales().get(0).getLanguage());
-            ((TextView) chip).setText(japanese ? "圧縮ファイル" : "Archives");
+            String label = SettingsHooks.isJapanese(root.getContext()) ? "圧縮ファイル" : "Archives";
+            ((TextView) chip).setText(label);
+            chip.setContentDescription(label);
             chip.setTag(CHIP_TAG);
             checked.setChecked(state.isRequested(original));
             chip.setEnabled(selectionCount == 0);
