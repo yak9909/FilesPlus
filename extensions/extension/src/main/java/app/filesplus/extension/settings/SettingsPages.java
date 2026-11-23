@@ -172,9 +172,11 @@ public final class SettingsPages {
                 }
                 break;
             case "tabs":
-                toggle(screen, tr("空のフォルダもタブに表示", "Show empty folders as tabs"), null,
+                toggle(screen, tr("空のフォルダもタブに表示", "Show empty folders as tabs"),
+                        tr("ダウンロードのカテゴリだけ", "Downloads category only"),
                         ModSettings.TABS_SHOW_EMPTY_FOLDERS, ModSettings.DEFAULT_TABS_SHOW_EMPTY_FOLDERS);
-                toggle(screen, tr("隠しフォルダも表示", "Show hidden folders"), null,
+                toggle(screen, tr("隠しフォルダも表示", "Show hidden folders"),
+                        tr("空のフォルダのタブで", "For empty-folder tabs"),
                         ModSettings.TABS_SHOW_HIDDEN, ModSettings.DEFAULT_TABS_SHOW_HIDDEN);
                 break;
             case "skip":

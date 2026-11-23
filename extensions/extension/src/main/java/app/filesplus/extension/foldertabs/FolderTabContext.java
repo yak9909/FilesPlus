@@ -55,6 +55,7 @@ public final class FolderTabContext {
     private static final String KNOWN_PREFIX = LocalFolders.KNOWN_PREFIX;
     private static final Object KNOWN_LOCK = new Object();
     private static final Map<String, String> TAB_QUERIES = new LinkedHashMap<>();
+    private static final String DOWNLOAD_CATEGORY = "CATEGORY_DOWNLOAD";
     private static final Set<String> STANDARD = new HashSet<>(Arrays.asList(
             "dcim", "download", "movies", "pictures", "music", "documents", "alarms",
             "notifications", "podcasts", "ringtones", "recordings", "audiobooks"));
@@ -181,12 +182,17 @@ public final class FolderTabContext {
                 if (!known.equals(saved)) prefs.edit().putStringSet(key, known).apply();
                 if (!ModSettings.getBool(ModSettings.TABS_SHOW_EMPTY_FOLDERS,
                         ModSettings.DEFAULT_TABS_SHOW_EMPTY_FOLDERS)) return new String[0];
+                // DESIGN §5.12.7 (6): only Downloads gets empty-folder tabs. In the media categories a folder
+                // missing from MediaStore often still held media, so those tabs were wrong.
+                if (!DOWNLOAD_CATEGORY.equals(category)) return new String[0];
                 boolean hidden = ModSettings.getBool(ModSettings.TABS_SHOW_HIDDEN, ModSettings.DEFAULT_TABS_SHOW_HIDDEN);
                 List<String> added = new ArrayList<>();
                 for (String path : known) {
                     File folder = new File(path);
                     if (present.contains(path) || names.contains(folder.getName().toLowerCase(Locale.ROOT))) continue;
                     if ((!hidden && folder.getName().startsWith(".")) || protectedPath(folder, volumes, false)) continue;
+                    // Judge emptiness by the real folder, not by MediaStore.
+                    if (!reallyEmpty(folder)) continue;
                     // Canonical equality also excludes symlinks and paths that escape mounted storage.
                     if (path.equals(LocalFolders.folderPath(folder, volumes))) added.add(path);
                 }
@@ -203,6 +209,14 @@ public final class FolderTabContext {
             DiagLog.e(AREA, "Cannot extend folder tabs for " + category, t);
             return new String[0];
         }
+    }
+
+    /** True when the folder holds nothing but dot entries (".nomedia" included). Unreadable counts as not empty. */
+    static boolean reallyEmpty(File folder) {
+        String[] names = folder.list();
+        if (names == null) return false;
+        for (String name : names) if (!name.startsWith(".")) return false;
+        return true;
     }
 
     private static void forgetDeletedFolders(Context context, File removed) {
