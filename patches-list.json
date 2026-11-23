@@ -1,6 +1,6 @@
 {
   "NOTE": "Do NOT manually edit this file. This file is automatically updated when semantic release (release.yml) runs. Manually editing this file can break your releases and break third party tools that use this file.",
-  "version": "1.0.0-dev.21",
+  "version": "1.0.0-dev.22",
   "patches": [
     {
       "name": "Change package name",
@@ -213,6 +213,33 @@
     {
       "name": "Open folder stack",
       "description": "Lets the storage browser open with a folder stack (volume root down to a folder) so that back and the breadcrumb work. Used by the other features that open the app's own screens.",
+      "default": true,
+      "category": null,
+      "compatiblePackages": [
+        {
+          "packageName": "com.google.android.apps.nbu.files",
+          "name": "Files by Google",
+          "description": null,
+          "apkFileType": "APKM",
+          "appIconColor": "#4484F4",
+          "signatures": null,
+          "formFactor": "MOBILE",
+          "targets": [
+            {
+              "version": "1.13157.1011540316.0-release",
+              "versionCodes": null,
+              "isExperimental": false,
+              "minSdk": null,
+              "description": null
+            }
+          ]
+        }
+      ],
+      "options": []
+    },
+    {
+      "name": "SMB in storage browser",
+      "description": "Browse saved SMB connections from All storage in the native read-only storage browser.",
       "default": true,
       "category": null,
       "compatiblePackages": [

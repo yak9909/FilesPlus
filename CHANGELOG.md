@@ -1,3 +1,9 @@
+## [1.0.0-dev.22](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.21...v1.0.0-dev.22) (2026-11-23)
+
+### ✨ New Features
+
+* Open SMB shares in the original storage browser ([d6c32db](https://github.com/yak9909/FilesPlus/commit/d6c32dbd413d536094133d8e07a3d2ad9e386238))
+
 ## [1.0.0-dev.21](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.20...v1.0.0-dev.21) (2026-11-23)
 
 ### 🐛 Bug Fixes

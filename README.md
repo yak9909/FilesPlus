@@ -21,9 +21,9 @@ Click the button below, or manually add this repo url to Morphe Manager: https:/
 ## 🩹 Patches list
 
 <!-- PATCHES_START EXPANDED -->
-> **[v1.0.0-dev.21](https://github.com/yak9909/FilesPlus/releases/tag/v1.0.0-dev.21)**&nbsp;&nbsp;•&nbsp;&nbsp;`dev`&nbsp;&nbsp;•&nbsp;&nbsp;10 patches total
+> **[v1.0.0-dev.22](https://github.com/yak9909/FilesPlus/releases/tag/v1.0.0-dev.22)**&nbsp;&nbsp;•&nbsp;&nbsp;`dev`&nbsp;&nbsp;•&nbsp;&nbsp;11 patches total
 <details open>
-<summary>📦 Files by Google&nbsp;&nbsp;•&nbsp;&nbsp;10 patches</summary>
+<summary>📦 Files by Google&nbsp;&nbsp;•&nbsp;&nbsp;11 patches</summary>
 <br>
 
 **Package name:** `com.google.android.apps.nbu.files`
@@ -43,6 +43,7 @@ Click the button below, or manually add this repo url to Morphe Manager: https:/
 | [High-resolution playback](#high-resolution-playback) | Try videos beyond reported decoder limits, enable decoder fallback, and log playback diagnostics. |  |
 | [Multi-select in preview](#multi-select-in-preview) | Add Select / Deselect items to the preview screen's menu to collect files while previewing, and select them in the list when you go back. |  |
 | [Open folder stack](#open-folder-stack) | Lets the storage browser open with a folder stack (volume root down to a folder) so that back and the breadcrumb work. Used by the other features that open the app's own screens. |  |
+| [SMB in storage browser](#smb-in-storage-browser) | Browse saved SMB connections from All storage in the native read-only storage browser. |  |
 | [Show empty folder tabs](#show-empty-folder-tabs) | Remember category folders and optionally append tabs for known folders with no matching files. |  |
 | [Switch view](#switch-view) | Switch between the app's storage and media browsers from the top overflow. |  |
 
