@@ -1,3 +1,9 @@
+## [1.0.0-dev.25](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.24...v1.0.0-dev.25) (2026-11-23)
+
+### ✨ New Features
+
+* Select files by long-pressing them in the preview ([bab10a2](https://github.com/yak9909/FilesPlus/commit/bab10a2bf3f95f9a766e31de3d9b1809cc26303a))
+
 ## [1.0.0-dev.24](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.23...v1.0.0-dev.24) (2026-11-23)
 
 ### ✨ New Features

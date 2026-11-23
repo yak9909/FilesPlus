@@ -1,7 +1,7 @@
 {
-  "created_at": "2026-11-23T17:18:56",
-  "description": "## [1.0.0-dev.24](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.23...v1.0.0-dev.24) (2026-11-23)\n\n### ✨ New Features\n\n* Add an Archives filter chip to the Downloads category ([e3d05e6](https://github.com/yak9909/FilesPlus/commit/e3d05e633cf1cd5e5d6b768e20f0196803ec1163))",
-  "download_url": "https://github.com/yak9909/FilesPlus/releases/download/v1.0.0-dev.24/patches-1.0.0-dev.24.mpp",
+  "created_at": "2026-11-23T21:50:15",
+  "description": "## [1.0.0-dev.25](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.24...v1.0.0-dev.25) (2026-11-23)\n\n### ✨ New Features\n\n* Select files by long-pressing them in the preview ([bab10a2](https://github.com/yak9909/FilesPlus/commit/bab10a2bf3f95f9a766e31de3d9b1809cc26303a))",
+  "download_url": "https://github.com/yak9909/FilesPlus/releases/download/v1.0.0-dev.25/patches-1.0.0-dev.25.mpp",
   "signature_download_url": "",
-  "version": "1.0.0-dev.24"
+  "version": "1.0.0-dev.25"
 }
