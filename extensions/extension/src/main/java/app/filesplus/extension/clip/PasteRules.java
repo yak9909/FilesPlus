@@ -90,7 +90,7 @@ public final class PasteRules {
             if (item.path() == null || item.path().startsWith("smb://")) return Result.refused(Reason.SMB);
         }
         if (target.isAllTab()) {
-            if (target.needsPicker()) return Result.pick();
+            if (target.needsPicker()) return tooLarge(state) ? Result.refused(Reason.TOO_LARGE) : Result.pick();
             if (target.folder() == null) return Result.refused(Reason.ALL_TAB_DISABLED);
         }
         File dest = target.folder();

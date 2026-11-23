@@ -1,6 +1,7 @@
 package app.filesplus.extension.clip;
 
 import android.content.Context;
+import android.graphics.drawable.Drawable;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Parcelable;
@@ -27,7 +28,7 @@ import java.util.WeakHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/** Clipboard entry points only. No paste UI or file mutation. App objects are serialized immediately. */
+/** Clipboard patch entry points. App protobuf objects are serialized immediately. */
 public final class ClipHooks {
     private static final int CUT = 0x7e434c31;
     private static final int ADD = 0x7e434c32;
@@ -41,6 +42,54 @@ public final class ClipHooks {
     /** Replaced at patch time; diagnostics report installation, even before a screen has been opened. */
     public static String installedHooks() { return "Clipboard: not installed"; }
     public static boolean installed() { return false; }
+
+    /** Patched to call the same MaterialButton icon setter as the native folder picker. */
+    public static boolean setPasteIcon(View button, Drawable icon) { return false; }
+
+    public static void attachStoragePaste(View root, byte[] folder, boolean expressive) {
+        try { PasteUi.attachStorage(root, folder, expressive); }
+        catch (Throwable error) { hookError(error); }
+    }
+
+    public static void attachMediaPaste(View root, String category) {
+        try { PasteUi.attachMedia(root, category); }
+        catch (Throwable error) { hookError(error); }
+    }
+
+    public static void pasteMenu(View root, Menu menu) {
+        try { PasteUi.menu(root, menu); }
+        catch (Throwable error) { hookError(error); }
+    }
+
+    public static void pasteTabChanged(View root) {
+        try { PasteUi.tabChanged(root); }
+        catch (Throwable error) { hookError(error); }
+    }
+
+    public static void pasteSettingChanged() {
+        try { Clipboard.notifyListeners(); }
+        catch (Throwable error) { hookError(error); }
+    }
+
+    public static void pasteBarFlag(boolean expressive) {
+        try { PasteUi.nativeFlag(expressive); }
+        catch (Throwable error) { hookError(error); }
+    }
+
+    public static void observedPasteBarFlag(boolean expressive) {
+        try { PasteUi.observedFlag(expressive); }
+        catch (Throwable error) { hookError(error); }
+    }
+
+    static void work(Runnable task) { WORKER.execute(task); }
+
+    public static String previewPagePath(Object entry) {
+        try {
+            if (!installed()) return null;
+            byte[] raw = bytes(entry);
+            return raw == null ? null : ClipSources.file(ProtoNode.decode(raw)).path;
+        } catch (Throwable t) { hookError(t); return null; }
+    }
 
     /** Serialize through the app's unobfuscated Parcelable wrapper; no protobuf names or reflection on fields. */
     public static byte[] bytes(Object message) {

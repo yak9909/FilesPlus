@@ -166,10 +166,10 @@ val previewMultiSelectPatch = bytecodePatch(
             move-result v0
             return v0
         """.trimIndent())
-        // Page change: the same current-file read, handed to the overlay. Registers: v0 root, v2/v3 id, v4 has-id.
+        // Pass the current entry as well so pending clipboard moves can match a page without a MediaStore id.
         val pageBridge = peer.bridge("modKitPreviewPage", emptyList(), "V", 7, """
             $loadCurrent
-            invoke-static {v0, v2, v3, v4}, $HOOK->onPageSelected(${VIEW}JZ)V
+            invoke-static {v0, v2, v3, v4, v5}, $HOOK->onPageSelected(${VIEW}JZLjava/lang/Object;)V
             return-void
         """.trimIndent())
         val fragmentBridge = fragment.bridge("modKitPreviewItem", listOf(MENU_ITEM), "Z", 3, """

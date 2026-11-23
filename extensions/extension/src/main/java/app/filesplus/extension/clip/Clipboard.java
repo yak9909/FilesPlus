@@ -446,7 +446,8 @@ public final class Clipboard {
         notifyListeners();
     }
 
-    private static void notifyListeners() {
+    // The paste UI also signals transient changes such as a running paste or a setting change.
+    static void notifyListeners() {
         if (LISTENERS.isEmpty()) return;
         Runnable run = () -> {
             for (Runnable listener : LISTENERS) {

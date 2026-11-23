@@ -65,6 +65,15 @@ public enum Category {
         return appCategories;
     }
 
+    public static Category ofAppCategory(String name) {
+        for (Category category : values()) {
+            for (String appCategory : category.appCategories) {
+                if (appCategory.equals(name)) return category;
+            }
+        }
+        return null;
+    }
+
     private static String extensionOf(String name) {
         if (name == null) return null;
         int dot = name.lastIndexOf('.');

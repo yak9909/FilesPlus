@@ -9,6 +9,7 @@ import app.filesplus.extension.browse.Category;
 import app.filesplus.extension.browse.LocalFolders;
 import app.filesplus.extension.browse.Location;
 import app.filesplus.extension.move.DestinationHistory;
+import app.filesplus.extension.ui.ProtoNode;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -63,8 +64,18 @@ public final class PasteTarget {
     /** A place on an SMB share or any other non-local place: never pastable until S9. */
     public static PasteTarget ofLocation(Location location) {
         if (location == null) return new PasteTarget(null, false, false, false, false, null);
-        if (location.isSmb()) return new PasteTarget(null, true, false, false, false, null);
+        if (location.isSmb()) return nonLocal();
         return ofFolder(location.file());
+    }
+
+    static PasteTarget nonLocal() {
+        return new PasteTarget(null, true, false, false, false, null);
+    }
+
+    static PasteTarget ofStorageFolder(byte[] folder) {
+        if (folder == null) return ofFolder(null);
+        ClipSources.Source source = ClipSources.folder(ProtoNode.decode(folder));
+        return source.local() ? ofFolder(new File(source.path)) : nonLocal();
     }
 
     /**

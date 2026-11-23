@@ -43,6 +43,7 @@ public final class MoveQueue {
     private static final long NO_PAGE = Long.MIN_VALUE;
 
     private static long currentId = NO_PAGE;
+    private static String currentPath;
     private static final List<Job> deferred = new ArrayList<>();
     /** Sources (lower case) of unfinished paste jobs: the same source is never in two jobs (DESIGN 10.8). */
     private static final Set<String> inFlight = new HashSet<>();
@@ -183,14 +184,17 @@ public final class MoveQueue {
     }
 
     /** The preview page changed: release held jobs whose file is no longer the current page. */
-    public static void onPageChanged(long currentId) {
+    public static void onPageChanged(long currentId, String path) {
         try {
             List<Job> release = new ArrayList<>();
             synchronized (LOCK) {
                 MoveQueue.currentId = currentId;
+                currentPath = path;
                 for (Iterator<Job> it = deferred.iterator(); it.hasNext(); ) {
                     Job job = it.next();
-                    if (job.id != currentId) {
+                    boolean same = job.paths == null ? job.id == currentId
+                            : samePreviewFile(job.id, job.paths.get(0), currentId, path);
+                    if (!same) {
                         release.add(job);
                         it.remove();
                     }
@@ -208,6 +212,7 @@ public final class MoveQueue {
             List<Job> release;
             synchronized (LOCK) {
                 currentId = NO_PAGE;
+                currentPath = null;
                 release = new ArrayList<>(deferred);
                 deferred.clear();
             }
@@ -219,6 +224,11 @@ public final class MoveQueue {
 
     private static boolean isDeferrable(Job job) {
         return isDeferrable(job.mime);
+    }
+
+    static boolean samePreviewFile(long id, String path, long pageId, String pagePath) {
+        if (id > 0 && pageId > 0) return id == pageId;
+        return path != null && path.equals(pagePath);
     }
 
     private static boolean isDeferrable(String mime) {
@@ -441,7 +451,7 @@ public final class MoveQueue {
             synchronized (LOCK) {
                 List<ClipItem> waiting = new ArrayList<>();
                 for (ClipItem item : paste.present) {
-                    boolean playing = item.mediaId() > 0 && item.mediaId() == currentId
+                    boolean playing = samePreviewFile(item.mediaId(), item.path(), currentId, currentPath)
                             && isDeferrable(mimeOf(item.name()));
                     if (playing) waiting.add(item);
                     else now.add(item);
@@ -583,13 +593,14 @@ public final class MoveQueue {
 
     private static String pasteMessage(Context context, PasteResult r) {
         boolean ja = "ja".equals(context.getResources().getConfiguration().getLocales().get(0).getLanguage());
-        String path = r.destination.getPath();
+        String path = r.destination.getAbsolutePath();
         StringBuilder sb = new StringBuilder();
         if (r.moved == 0 && r.failed > 0) {
             sb.append(ja ? "貼り付けできませんでした（" + r.failed + " 件）" : "Could not paste " + r.failed
                     + (r.failed == 1 ? " item" : " items"));
+            sb.append(ja ? " 貼り付け先: " : " to ").append(path);
         } else if (r.moved == 0) {
-            sb.append(ja ? "貼り付けるものがありませんでした" : "Nothing to paste");
+            sb.append(ja ? "貼り付けるものがありませんでした 貼り付け先: " : "Nothing to paste to ").append(path);
         } else if (ja) {
             sb.append(r.moved).append(" 件を ").append(path).append(" に貼り付けました");
         } else {
