@@ -4,7 +4,6 @@ import android.content.Context;
 import android.graphics.drawable.Drawable;
 import android.os.Handler;
 import android.os.Looper;
-import android.os.Parcelable;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
@@ -18,7 +17,6 @@ import app.filesplus.extension.preview.SelectionStore;
 import app.filesplus.extension.ui.ProtoNode;
 import app.filesplus.extension.ui.ScreenArgs;
 import java.io.File;
-import java.lang.reflect.Constructor;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -91,21 +89,9 @@ public final class ClipHooks {
         } catch (Throwable t) { hookError(t); return null; }
     }
 
-    /** Serialize through the app's unobfuscated Parcelable wrapper; no protobuf names or reflection on fields. */
     public static byte[] bytes(Object message) {
-        try {
-            if (message == null) return null;
-            Class<?> type = Class.forName("com.google.protobuf.contrib.android.ProtoParsers$InternalDontUse");
-            for (Constructor<?> ctor : type.getConstructors()) {
-                Class<?>[] p = ctor.getParameterTypes();
-                if (p.length == 2 && p[0] == byte[].class && p[1].isInstance(message)) {
-                    byte[] result = ScreenArgs.unwrap((Parcelable) ctor.newInstance(null, message));
-                    if (result == null) throw new IllegalStateException("Cannot serialize clipboard entry");
-                    return result;
-                }
-            }
-            throw new NoSuchMethodException("ProtoParsers wrapper");
-        } catch (Throwable error) { hookError(error); return null; }
+        try { return ScreenArgs.serialize(message); }
+        catch (Throwable error) { hookError(error); return null; }
     }
 
     private static boolean japanese(Context context) {

@@ -300,6 +300,7 @@ public final class FolderTabContext {
     private void tabChanged() {
         updateMenu();
         app.filesplus.extension.clip.ClipHooks.pasteTabChanged(root.get());
+        app.filesplus.extension.browse.ViewSwitch.tabChanged(root.get());
     }
 
     public void tabsChanged() {

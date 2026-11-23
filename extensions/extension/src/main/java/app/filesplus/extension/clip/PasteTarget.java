@@ -117,17 +117,7 @@ public final class PasteTarget {
 
     /** The category's standard folder: Pictures, Movies, Music, Documents or Download. */
     static File defaultFolder(Category category) {
-        if (category == null) return null;
-        String directory;
-        switch (category) {
-            case IMAGES: directory = Environment.DIRECTORY_PICTURES; break;
-            case VIDEOS: directory = Environment.DIRECTORY_MOVIES; break;
-            case AUDIO: directory = Environment.DIRECTORY_MUSIC; break;
-            case DOCUMENTS: directory = Environment.DIRECTORY_DOCUMENTS; break;
-            case DOWNLOADS: directory = Environment.DIRECTORY_DOWNLOADS; break;
-            default: return null;
-        }
-        return Environment.getExternalStoragePublicDirectory(directory);
+        return category == null ? null : Environment.getExternalStoragePublicDirectory(category.defaultDirectory);
     }
 
     /** The destination folder; null for SMB, for an "All" tab that cannot be pasted into and for "ask". */

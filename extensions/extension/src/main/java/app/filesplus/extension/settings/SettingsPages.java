@@ -24,6 +24,7 @@ import app.filesplus.extension.DiagLog;
 import app.filesplus.extension.ModKit;
 import app.filesplus.extension.ModSettings;
 import app.filesplus.extension.browse.Category;
+import app.filesplus.extension.browse.ViewSwitch;
 import app.filesplus.extension.clip.PasteSelfTest;
 import app.filesplus.extension.clip.Clipboard;
 import app.filesplus.extension.clip.InterruptedPastes;
@@ -145,7 +146,7 @@ public final class SettingsPages {
 
     private static boolean hasItems(String id) {
         return "tabs".equals(id) || "skip".equals(id) || "clipboard".equals(id)
-                || "smb".equals(id) || "diag".equals(id);
+                || ("switch".equals(id) && ViewSwitch.installed()) || "smb".equals(id) || "diag".equals(id);
     }
 
     private String pageTitle() { return titleOf(page); }
@@ -185,9 +186,9 @@ public final class SettingsPages {
                         ModSettings.SKIP_REWIND_TO_START, ModSettings.DEFAULT_SKIP_REWIND_TO_START);
                 break;
             case "clipboard": clipboard(); break;
+            case "switch": if (ViewSwitch.installed()) viewSwitch(); break;
             case "smb": smb(); break;
             case "diag": diagnostics(); break;
-            // Preview and view switching are reserved for later tasks.
             default: break;
         }
     }
@@ -238,6 +239,33 @@ public final class SettingsPages {
                     bridge.setSummary(pref, labels[which]);
                     app.filesplus.extension.clip.ClipHooks.pasteSettingChanged();
                 })));
+        bridge.addTo(screen, pref);
+    }
+
+    private void viewSwitch() {
+        switchChoice(ModSettings.SWITCH_TO_MEDIA_CATEGORY,
+                tr("メディアで表示するカテゴリ", "Category for Show as media"), new String[]{"auto", "ask"},
+                new String[]{tr("自動（既定）", "Automatic (default)"), tr("毎回選ぶ", "Ask every time")});
+        switchChoice(ModSettings.SWITCH_ALL_TAB_TARGET,
+                tr("「すべて」タブから開くフォルダ", "Folder to open from the All tab"),
+                new String[]{"default", "last", "latest", "root"}, new String[]{
+                    tr("カテゴリの既定フォルダ（既定）", "Category's default folder (default)"),
+                    tr("最後に開いていたフォルダ", "Last opened folder"),
+                    tr("そのカテゴリで最新のファイルがあるフォルダ", "Folder with the newest file"),
+                    tr("内部ストレージのルート", "Internal storage root")
+                });
+    }
+
+    private void switchChoice(String key, String title, String[] values, String[] labels) {
+        Supplier<Integer> selected = () -> Math.max(0, java.util.Arrays.asList(values).indexOf(
+                key.equals(ModSettings.SWITCH_TO_MEDIA_CATEGORY)
+                        ? ModSettings.switchToMediaCategory() : ModSettings.switchAllTabTarget()));
+        Object pref = preference(title, labels[selected.get()]);
+        bridge.setKey(pref, key);
+        bridge.setClick(pref, listener(bridge.clickType(), () -> choices(title, labels, selected.get(), which -> {
+            ModSettings.setSwitchChoice(key, values[which]);
+            bridge.setSummary(pref, labels[which]);
+        })));
         bridge.addTo(screen, pref);
     }
 
@@ -312,6 +340,12 @@ public final class SettingsPages {
     private interface SaveInput { String save(String value); }
     private interface Choose { void select(int index); }
 
+    /** The settings patch replaces this stub with the native Material single-choice builder. */
+    public static Dialog nativeChoices(Context context, CharSequence title, CharSequence[] items, int selected,
+            android.content.DialogInterface.OnClickListener listener) {
+        throw new IllegalStateException("Native single-choice dialog is unavailable");
+    }
+
     private void choices(String title, String[] items, int selected, Choose action) {
         Dialog dialog = bridge.choices(activity, title, items, selected, (d, index) -> safely(() -> {
             d.dismiss();
@@ -383,6 +417,8 @@ public final class SettingsPages {
     private void diagnostics() {
         row(screen, tr("クリップボードのフック", "Clipboard hooks"),
                 app.filesplus.extension.clip.ClipHooks.installedHooks(), null);
+        row(screen, tr("表示の切り替えのフック", "Switch view hooks"),
+                ViewSwitch.hookStatus(japanese), null);
         deviceReport = deviceReport();
         row(screen, tr("端末情報", "Device information"), deviceReport, () -> report(pageTitle(), deviceReport, true));
         Object codecs = row(screen, tr("動画デコーダー", "Video decoders"),

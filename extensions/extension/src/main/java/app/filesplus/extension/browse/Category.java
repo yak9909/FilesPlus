@@ -11,29 +11,31 @@ import java.util.Set;
  * feed the known-folders sets (DESIGN 5.9).
  */
 public enum Category {
-    IMAGES("media_type = 1", ext("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif", "avif", "dng", "raw",
+    IMAGES("Pictures", "media_type = 1", ext("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif", "avif", "dng", "raw",
             "arw", "cr2", "nef", "svg"), "CATEGORY_IMAGE"),
-    VIDEOS("media_type = 3", ext("mp4", "m4v", "mkv", "webm", "mov", "avi", "3gp", "3g2", "wmv", "flv", "ts",
+    VIDEOS("Movies", "media_type = 3", ext("mp4", "m4v", "mkv", "webm", "mov", "avi", "3gp", "3g2", "wmv", "flv", "ts",
             "mpg", "mpeg", "ogv"), "CATEGORY_VIDEO"),
-    AUDIO("media_type = 2", ext("mp3", "m4a", "aac", "flac", "wav", "ogg", "oga", "opus", "amr", "wma", "mid",
+    AUDIO("Music", "media_type = 2", ext("mp3", "m4a", "aac", "flac", "wav", "ogg", "oga", "opus", "amr", "wma", "mid",
             "midi", "mka"), "CATEGORY_AUDIO"),
     // Since API 30 the index types pdf/office/text/epub as MEDIA_TYPE_DOCUMENT (6); other document-like files are
     // plain files (media_type 0) and are told apart by MIME type. A constant: never built from user input.
-    DOCUMENTS("(media_type = 6 OR (media_type = 0 AND (mime_type LIKE 'text/%' OR mime_type LIKE 'application/vnd.ms-%'"
+    DOCUMENTS("Documents", "(media_type = 6 OR (media_type = 0 AND (mime_type LIKE 'text/%' OR mime_type LIKE 'application/vnd.ms-%'"
             + " OR mime_type LIKE 'application/vnd.openxmlformats-officedocument.%'"
             + " OR mime_type LIKE 'application/vnd.oasis.opendocument.%'"
             + " OR mime_type IN ('application/pdf', 'application/msword', 'application/rtf', 'application/epub+zip'))))",
             ext("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp", "txt", "rtf", "csv", "epub",
                     "md", "json", "xml", "html", "htm"), "CATEGORY_DOCUMENT", "CATEGORY_DOCUMENT_ONLY"),
     /** A shortcut to the Download folder, not a MediaStore category: it has no predicate and no extensions. */
-    DOWNLOADS(null, ext(), "CATEGORY_DOWNLOAD");
+    DOWNLOADS("Download", null, ext(), "CATEGORY_DOWNLOAD");
 
     /** MediaStore WHERE clause for the "files" table, or null when this category is not index based. */
     public final String selection;
+    public final String defaultDirectory;
     private final Set<String> extensions;
     private final String[] appCategories;
 
-    Category(String selection, Set<String> extensions, String... appCategories) {
+    Category(String defaultDirectory, String selection, Set<String> extensions, String... appCategories) {
+        this.defaultDirectory = defaultDirectory;
         this.selection = selection;
         this.extensions = extensions;
         this.appCategories = appCategories;

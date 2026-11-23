@@ -25,6 +25,10 @@ public final class ModSettings {
 
     public static final String PASTE_ALL_TAB = "paste.allTab";
 
+    public static final String SWITCH_TO_MEDIA_CATEGORY = "switch.toMediaCategory";
+    public static final String SWITCH_ALL_TAB_TARGET = "switch.allTabTarget";
+    private static final String SWITCH_LAST_FOLDER = "switch.lastFolder";
+
     private ModSettings() {}
 
     public static SharedPreferences prefs() {
@@ -88,5 +92,36 @@ public final class ModSettings {
     public static void setPasteAllTab(String value) {
         SharedPreferences p = prefs();
         if (p != null) p.edit().putString(PASTE_ALL_TAB, value).apply();
+    }
+
+    public static String switchToMediaCategory() {
+        return switchValue(SWITCH_TO_MEDIA_CATEGORY, "auto");
+    }
+
+    public static String switchAllTabTarget() {
+        return switchValue(SWITCH_ALL_TAB_TARGET, "default");
+    }
+
+    public static String switchLastFolder() {
+        return switchValue(SWITCH_LAST_FOLDER, null);
+    }
+
+    public static void rememberSwitchFolder(String path) {
+        if (!path.equals(switchLastFolder())) setSwitchChoice(SWITCH_LAST_FOLDER, path);
+    }
+
+    public static void setSwitchChoice(String key, String value) {
+        SharedPreferences p = prefs();
+        if (p != null) p.edit().putString(key, value).apply();
+    }
+
+    private static String switchValue(String key, String fallback) {
+        try {
+            SharedPreferences p = prefs();
+            return p == null ? fallback : p.getString(key, fallback);
+        } catch (Throwable t) {
+            DiagLog.e("switch", "Cannot read " + key, t);
+            return fallback;
+        }
     }
 }

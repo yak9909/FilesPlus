@@ -28,6 +28,7 @@ import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -275,7 +276,61 @@ public final class LocalSource implements BrowseSource {
         return out;
     }
 
+    /** Parent of the newest indexed file. Downloads has its own MediaStore collection. */
+    public File latestFolder(Category category) throws IOException {
+        Uri collection = category == Category.DOWNLOADS
+                ? MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL)
+                : MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL);
+        Bundle args = new Bundle();
+        if (category.indexed()) args.putString(ContentResolver.QUERY_ARG_SQL_SELECTION, category.selection);
+        args.putString(ContentResolver.QUERY_ARG_SQL_SORT_ORDER, "date_modified DESC, _id DESC");
+        args.putInt(ContentResolver.QUERY_ARG_LIMIT, 1);
+        try (Cursor cursor = context.getContentResolver().query(collection,
+                new String[]{"relative_path", "volume_name"}, args, null)) {
+            if (cursor == null) throw new IOException("MediaStore query failed");
+            if (!cursor.moveToFirst()) return null;
+            String relative = cursor.getString(0);
+            String name = cursor.getString(1);
+            if (relative == null || name == null) return null;
+            for (Volume volume : volumes()) {
+                if (!name.equals(volume.mediaVolume)) continue;
+                // MediaStore uses "/" for files directly in the volume root.
+                if ("/".equals(relative)) return volume.root.file();
+                Location folder = Location.local(new File(volume.root.path, relative));
+                return folder == null ? null : folder.file();
+            }
+            return null;
+        }
+    }
+
     // ---- folders (java.io) ------------------------------------------------------------------------------------
+
+    /** Count only direct, visible regular files using the same extension rules as list(). */
+    public static Map<Category, Integer> categoryCounts(File directory) throws IOException {
+        File[] children = directory.listFiles();
+        if (children == null) throw new IOException("Cannot read folder " + directory);
+        Map<Category, Integer> counts = new EnumMap<>(Category.class);
+        for (File child : children) {
+            String name = child.getName();
+            if (name.startsWith(".") || Files.isSymbolicLink(child.toPath()) || !child.isFile()) continue;
+            Category category = Category.ofName(name);
+            if (category != null) counts.merge(category, 1, Integer::sum);
+        }
+        return counts;
+    }
+
+    /** Category declaration order breaks ties: image, video, audio, document. */
+    public static Category dominantCategory(File directory) throws IOException {
+        Category best = null;
+        int most = 0;
+        for (Map.Entry<Category, Integer> entry : categoryCounts(directory).entrySet()) {
+            if (entry.getValue() > most) {
+                best = entry.getKey();
+                most = entry.getValue();
+            }
+        }
+        return best;
+    }
 
     @Override public List<Entry> list(Location dir, Category filterOrNull) throws IOException {
         if (dir == null || !dir.isLocal()) throw new IOException("Not a local folder: " + dir);
