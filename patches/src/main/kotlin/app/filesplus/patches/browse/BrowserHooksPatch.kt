@@ -4,6 +4,7 @@ import app.filesplus.patches.foldertabs.folderTabContextPatch
 import app.filesplus.patches.misc.modKitIntegrationPatch
 import app.filesplus.patches.shared.Constants
 import app.morphe.patcher.extensions.InstructionExtensions.addInstructions
+import app.morphe.patcher.extensions.InstructionExtensions.addInstructionsWithLabels
 import app.morphe.patcher.patch.BytecodePatchContext
 import app.morphe.patcher.patch.bytecodePatch
 import app.morphe.patcher.patch.resourcePatch
@@ -86,7 +87,9 @@ internal fun MutableClass.afterBrowserMethod(target: MutableMethod, body: String
         $result
     """.trimIndent())
     val start = wrapper.code().size
-    wrapper.addInstructions(start, body + "\n" + ret)
+    // addInstructions(index, smali) does not move the snippet's own labels to `index` (a branch to `:done` would
+    // land `start` instructions too early and fail ART verification). addInstructionsWithLabels remaps them.
+    wrapper.addInstructionsWithLabels(start, body + "\n" + ret)
     val handler = wrapper.code().size
     wrapper.addInstructions(handler, """
         move-exception v1
