@@ -8,7 +8,9 @@
 - **Task 7 済み（dev d6c32db feat、merge 73e1834、push 済み）**。直し 2 回目を自分で検証: `task-7-verify.ps1` 通過（dex 53,848）、エミュレーターの ART 検証 `Rejected methods: 0`、TestSMB を押すとトーストのあと元の「There's nothing here.」のまま閉じない、︙ は Select all / Sort by だけ、FAB なし（内部ストレージは FAB・Add new folder・Show as media あり）。Opus 再レビュー承認（Critical・Important なし）。
 - Minor（Task 7）: 削除済みの接続の行でルートの問い合わせが失敗したときにトーストが出ない／`ClipboardPatch.kt` `folderPopupEntry` の `PRIVATE` 判定が `one` の中で毎回評価される（見た目だけ）／`isFolderProto` が全ストレージブラウザで音量一覧の更新ごとに proto を直列化（負荷は小さい）。
 - 実機で見る点（Task 7）: 本物の SMB 共有（空の共有・中身のある共有）を All storage から開く、書き込みの項目が出ないこと、接続を消したあとの行。
-- 次の1手: 計画の **Task 8**（空のフォルダ・圧縮ファイル・プレビューの長押し、3 コミット）。S4・S6（§10.12）も優先度が高い。
+- **ユーザー指示（2026-11-24 深夜、就寝中）: 進められるところまで全部進める。使用量の止め・ユーザーの判断が要るなどで中断するときは、必ずこのメモを更新して /clear してよい状態にしてから止める。**
+- **Task 8a 済み（dev dcd46b9 feat、merge d18eba7、push 済み）**: 空のフォルダのタブはダウンロードのカテゴリだけ、空かは実際の中身（`.` で始まる名前は数えない）。メインが自分で実装（小さいため）。エミュレーターで確認（FoldA・FoldB が出る、サブフォルダを作ると消える、画像に PicE が出ない）。Opus 承認。Minor: (1) ダウンロードに出るのは一度ダウンロードのタブになったフォルダだけ（新しいフォルダ・画像だけのフォルダは出ない → DESIGN 815・483 行の流れより狭い。以前から同じ）(2) `DOWNLOAD_CATEGORY` の文字列の重複 (3) `LocalSource.mergeKnownFolders` が他カテゴリの既知フォルダを件数 0 で足す（呼び出し元なし？要整理）(4) `reallyEmpty` は全件を list する。設定の「隠しフォルダも表示」に説明を足した。
+- **Task 8b（ダウンロードの「圧縮ファイル」チップ）を taiyo に送信中: t20261124-012058-23**（gpt-6.2-sol/xhigh、指示書 `task-8b-brief.md`、報告 `task-8b-report.md`、ledger フォルダ）。返ってきたら: `task-8b-verify.ps1` → `scripts/emu-verify.sh`（0 件）→ エミュレーターでダウンロードにチップが出て絞り込めるか（zip などを Download に置く）→ Opus レビュー → `feat:` → マージ・push。そのあと Task 8c（プレビューの長押し → 選択の切り替え、設定 `preview.longPressSelect` 既定 ON、DESIGN 852 行・P0 §9.3）。
 
 ## （経緯）2026-11-23 夜
 - **Task 7 の直し 1 回目は済み**（t20261123-194526-15。taiyo の同じセッションの続き）。結果: `task-7-verify.ps1` は通り、エミュレーターの ART 検証は `Rejected methods: 0`。Opus レビューは「直しを入れて承認」（Critical なし）。
