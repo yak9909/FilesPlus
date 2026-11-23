@@ -1,3 +1,9 @@
+## [1.0.0-dev.21](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.20...v1.0.0-dev.21) (2026-11-23)
+
+### 🐛 Bug Fixes
+
+* Stop the crash when opening a category or the storage browser menus ([0ab7f89](https://github.com/yak9909/FilesPlus/commit/0ab7f89c541f7fe093f2969c476f46aaab719d4a))
+
 ## [1.0.0-dev.20](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.19...v1.0.0-dev.20) (2026-11-23)
 
 ### ✨ New Features
