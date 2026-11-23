@@ -432,6 +432,9 @@ public final class SettingsPages {
                 app.filesplus.extension.clip.ClipHooks.installedHooks(), null);
         row(screen, tr("表示の切り替えのフック", "Switch view hooks"),
                 ViewSwitch.hookStatus(japanese), null);
+        row(screen, tr("圧縮ファイルのフック", "Archives filter hooks"),
+                app.filesplus.extension.browse.ArchiveFilter.installed()
+                        ? tr("適用済み", "Installed") : tr("未適用", "Not installed"), null);
         boolean smbRoots = app.filesplus.extension.smb.SmbRoots.installed();
         row(screen, tr("SMB のストレージブラウザフック", "SMB storage browser hooks"),
                 smbRoots ? tr("適用済み", "Installed") : tr("未適用", "Not installed"), null);

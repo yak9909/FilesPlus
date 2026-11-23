@@ -33,7 +33,7 @@ private val inflateView = listOf("Landroid/view/LayoutInflater;",
 
 internal fun browserResourceId(name: String): Long = browserIds.getValue(name)
 
-private val browserResources = resourcePatch {
+internal val browserResources = resourcePatch {
     execute {
         browserIds = document("res/values/public.xml").use { doc ->
             val ids = mutableMapOf<String, Long>()
