@@ -1,10 +1,24 @@
-# 引き継ぎメモ（最終更新: 2026-11-23）
+# 引き継ぎメモ（最終更新: 2026-11-24）
 
 /clear のあとに作業を再開するためのメモ。まず `CLAUDE.md`（運用ルール）と `docs/WORKERS.md`（ワーカーのセッション）を読むこと。
 
 **再開したら、作業に入る前に必ず superpowers のスキルを Skill ツールで読み込むこと（ユーザー指示 2026-11-12。「superpowers に従っている感じがしない」との指摘）。** 最低限 `superpowers:using-superpowers` を読み、そのうえで作業に合うものを読み込んで従う（調査・設計のやり直し → `superpowers:brainstorming`／計画書 → `superpowers:writing-plans`／実装の配分 → `superpowers:subagent-driven-development`／レビュー → `superpowers:requesting-code-review`・`superpowers:receiving-code-review`／完了の判断 → `superpowers:verification-before-completion`）。「覚えているから読まなくてよい」とはしない。CLAUDE.md のユーザールールはスキルより優先。
 
-## 進行中（2026-11-23 夕方）— まずここ
+## 進行中（2026-11-24）— まずここ
+- **Task 7 済み（dev d6c32db feat、merge 73e1834、push 済み）**。直し 2 回目を自分で検証: `task-7-verify.ps1` 通過（dex 53,848）、エミュレーターの ART 検証 `Rejected methods: 0`、TestSMB を押すとトーストのあと元の「There's nothing here.」のまま閉じない、︙ は Select all / Sort by だけ、FAB なし（内部ストレージは FAB・Add new folder・Show as media あり）。Opus 再レビュー承認（Critical・Important なし）。
+- Minor（Task 7）: 削除済みの接続の行でルートの問い合わせが失敗したときにトーストが出ない／`ClipboardPatch.kt` `folderPopupEntry` の `PRIVATE` 判定が `one` の中で毎回評価される（見た目だけ）／`isFolderProto` が全ストレージブラウザで音量一覧の更新ごとに proto を直列化（負荷は小さい）。
+- 実機で見る点（Task 7）: 本物の SMB 共有（空の共有・中身のある共有）を All storage から開く、書き込みの項目が出ないこと、接続を消したあとの行。
+- 次の1手: 計画の **Task 8**（空のフォルダ・圧縮ファイル・プレビューの長押し、3 コミット）。S4・S6（§10.12）も優先度が高い。
+
+## （経緯）2026-11-23 夜
+- **Task 7 の直し 1 回目は済み**（t20261123-194526-15。taiyo の同じセッションの続き）。結果: `task-7-verify.ps1` は通り、エミュレーターの ART 検証は `Rejected methods: 0`。Opus レビューは「直しを入れて承認」（Critical なし）。
+- エミュレーターに仮の SMB 接続（TestSMB、10.0.2.250、つながらない）を保存して確かめた。SMB の行は出て、押すと元のストレージ画面が開き、トーストも出る。ただし**一覧の失敗の約 1 秒後に画面が勝手に閉じる**（診断から開いても同じ）。→ 直しの 2 回目を **taiyo に送信中: t20261123-204102-19**（指示書 `task-7-fix2-brief.md`、ログ `task-7-emu-close.log`。どちらも ledger フォルダ）。Minor（favorites、`one(...)`、FAB のコメント）も同じ回に入れた。
+- 本物の SMB サーバー（impacket）での確かめは、Defender が読み込みを止めたので諦めた。中身が空の共有を開いたときの動きは、コードを読んで確かめてもらう＋実機で確かめる。
+- **直しの 2 回目は返ってきた（未検証）**: taiyo の報告は DONE_WITH_CONCERNS。原因は、元アプリのストレージの見張り（`hug.java:36`・`hsz.java:43`）が、一覧に無い SMB のルートを「取り外された」と見て画面を閉じていたこと。SMB のルートではこの確かめを飛ばし、元の「空のフォルダ」表示のまま残すようにした。変更: `SmbStorageRootsPatch.kt`・`SmbRoots.java`・`ClipboardPatch.kt`・`VerifySmbRoots.java`・`task-7-verify.ps1`・`task-7-report.md`（Fix round 2）。taiyo の自己検証: 11 Applied、fingerprint 51 本すべて 1 match、JVM 170 件 PASS、dex 53,848。**ユーザーの指示で、ここで中断（2026-11-23 夜、/clear のため。予約なし）**。
+- エミュレーターには仮の接続 TestSMB（10.0.2.250、共有名 shrae）が保存されたまま。押して閉じないか確かめるのに使う。
+- 次の1手: 自分で `task-7-verify.ps1` → `scripts/emu-verify.sh`（0 件）→ TestSMB の行を押して閉じないか確かめ、上の︙・FAB も確かめる → 小さい差分の再レビュー → `feat:` → dev にマージ・push。
+
+## （経緯）2026-11-23 夕方
 - **dev.19・dev.20 はカテゴリ（メディアブラウザ）を開くと落ちていた** → 原因と修正は **dev.21（0ab7f89 fix、merge 1def02c）**。Clipboard のフック（`afterBrowserMethod`）で、`addInstructions(index>0, smali)` がラベルを付け替えず分岐先がずれ、ART が `ixh`・`hul.U`・`htc.onCreateContextMenu`・`htp.a/b` を拒否していた。`addInstructionsWithLabels` に変えた。あわせて**クラッシュの記録**（`CrashLog`、診断の先頭に「前回のクラッシュ」）を足した。Opus レビュー承認、Minor は反映済み。
 - **エミュレーター**（ユーザー許可 2026-11-23）: AVD `fp31`（Android 12 x86_64、arm64 翻訳のみ → armeabi-v7a のライブラリは外して入れる）。`bash scripts/emu-verify.sh <mpp の絶対パス>` で全クラスの ART 検証（`Rejected methods: 0` 必須）。手動の操作用の補助は `build/emu/`（git 管理外: `t.sh` タップ＋画面、`find.sh` 文字の位置）。CLAUDE.md に手順を追記。
 - **Task 7（SMB をストレージブラウザで）は taiyo の実装が返ってきた（t20261123-150627-9）。dev を w/screens に取り込み済み（52ad3c9 へ早送り、Task 7 の未コミットの変更はそのまま）。`task-7-verify.ps1` は通る（11 Applied、dex 53,848）が、`scripts/emu-verify.sh` で ART が 2 つ拒否**: `hul.w`（末尾に足したコードが R8 に再利用された p0 を使う）と `SmbRoots.validRow`（生成したコードで v0 を int と object に使い回し）。直しの指示書 `task-7-fix1-brief.md` は書き済み。**taiyo は使用量の上限で 19:44 まで受付不可 → ユーザーの選択で待つ。19:44 に 1 回だけ再開の予約（CronCreate、e3928e3d）。taiyo がまだ受付不可なら過ぎるまで待ち、ほかの貸し手には回さない**。エミュレーターは起動したまま（止まっていたら `emulator -avd fp31 -no-snapshot -no-audio -gpu swiftshader_indirect` を裏で起動）。次の1手: `send_task(continue_task_id=t20261123-150627-9, model gpt-6.2-sol, effort high)` で指示書を送る → `task-7-verify.ps1` → `scripts/emu-verify.sh`（0 件）→ Opus レビュー → `feat:` → dev にマージ・push。
