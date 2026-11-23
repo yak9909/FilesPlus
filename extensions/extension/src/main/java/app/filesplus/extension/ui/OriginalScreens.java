@@ -228,6 +228,18 @@ public final class OriginalScreens {
         }
     }
 
+    /** Launches the one-level browser request used by the app's All-storage row. */
+    public static boolean openStorageRoot(Activity from, ProtoNode folder) {
+        try {
+            ProtoNode hut = new ProtoNode().setMessage(H_ROOT, folder).addMessage(H_STACK, folder)
+                    .setVarint(H_MODE, MODE_BROWSE).setVarint(H_ENTRY, ENTRY_FROM_LIST);
+            byte[] args = new ProtoNode().setMessage(1, hut).encode();
+            return launch(from, STORAGE_ACTIVITY, args, false, 0, false, true);
+        } catch (Throwable error) {
+            return fail(from, "openStorageRoot failed", error, true);
+        }
+    }
+
     /**
      * Opens the media browser of a category. {@code tabNameOrNull} is the display name of the tab to select first
      * (case-insensitive match; the first tab with that name wins).
@@ -554,11 +566,18 @@ public final class OriginalScreens {
         throw new NoSuchMethodException("InternalDontUse(byte[], message)");
     }
 
+    /** Parse using the default instance of an actual row from the app's loader. */
+    public static Object parseLike(Object example, byte[] bytes) throws ReflectiveOperationException {
+        Object prototype = defaultInstance(example.getClass());
+        if (prototype == null) throw new IllegalArgumentException("No default instance for app message");
+        return parse(prototype, bytes);
+    }
+
     /** The message class's default instance: its public static final field of its own type. */
     private static Object defaultInstance(Class<?> type) throws IllegalAccessException {
         for (Field f : type.getDeclaredFields()) {
             int m = f.getModifiers();
-            if (Modifier.isStatic(m) && f.getType() == type) {
+            if (Modifier.isStatic(m) && Modifier.isFinal(m) && f.getType() == type) {
                 f.setAccessible(true);
                 Object v = f.get(null);
                 if (v != null) return v;

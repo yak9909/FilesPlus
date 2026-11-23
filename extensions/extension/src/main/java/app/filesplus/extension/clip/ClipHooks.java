@@ -45,7 +45,9 @@ public final class ClipHooks {
     public static boolean setPasteIcon(View button, Drawable icon) { return false; }
 
     public static void attachStoragePaste(View root, byte[] folder, boolean expressive) {
-        try { PasteUi.attachStorage(root, folder, expressive); }
+        try {
+            if (!app.filesplus.extension.smb.SmbRoots.isFolder(folder)) PasteUi.attachStorage(root, folder, expressive);
+        }
         catch (Throwable error) { hookError(error); }
     }
 

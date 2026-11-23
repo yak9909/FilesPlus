@@ -3,7 +3,11 @@ package app.filesplus.extension.smb;
 import android.content.Context;
 import android.database.Cursor;
 import android.database.MatrixCursor;
+import android.os.Binder;
 import android.os.Build;
+import android.os.Bundle;
+import android.os.Process;
+import android.os.SystemClock;
 import android.os.CancellationSignal;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -11,32 +15,35 @@ import android.os.Looper;
 import android.os.ParcelFileDescriptor;
 import android.os.ProxyFileDescriptorCallback;
 import android.os.storage.StorageManager;
+import android.provider.DocumentsContract;
 import android.provider.DocumentsContract.Document;
 import android.provider.DocumentsContract.Root;
 import android.provider.DocumentsProvider;
 import android.system.ErrnoException;
 import android.system.OsConstants;
 import android.webkit.MimeTypeMap;
+import android.widget.Toast;
 
 import app.filesplus.extension.DiagLog;
 import app.filesplus.extension.ModKit;
+import app.filesplus.extension.settings.SettingsHooks;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Read-only DocumentsProvider exposing every saved SMB connection as a storage root, so the system picker
  * (and any SAF client) can browse and open files on the share. Document ids are {@link SmbDocId}. Writing,
  * creating, renaming and deleting are not offered (no document flags). Calls arrive on binder threads, which
- * may block; a call on the main thread is rejected. Failures reach the caller as short FileNotFoundExceptions
- * built by {@link SmbErrors#describe}; no other exception type leaves the provider.
+ * may block. Root metadata is local and safe on the main thread. Child listing reports failures in cursor extras.
  */
 public final class SmbDocumentsProvider extends DocumentsProvider {
     private static final String AREA = "smb";
-    private static final String AUTHORITY_SUFFIX = ".smb.documents";
+    private static final AtomicLong LAST_LIST_ERROR = new AtomicLong(-5_000);
     private static final String[] ROOT_COLUMNS = {Root.COLUMN_ROOT_ID, Root.COLUMN_FLAGS, Root.COLUMN_ICON,
             Root.COLUMN_TITLE, Root.COLUMN_SUMMARY, Root.COLUMN_DOCUMENT_ID};
     private static final String[] DOCUMENT_COLUMNS = {Document.COLUMN_DOCUMENT_ID, Document.COLUMN_DISPLAY_NAME,
@@ -59,7 +66,7 @@ public final class SmbDocumentsProvider extends DocumentsProvider {
             Context context = ModKit.context();
             if (context == null) return;
             context.getContentResolver().notifyChange(
-                    android.provider.DocumentsContract.buildRootsUri(context.getPackageName() + AUTHORITY_SUFFIX), null);
+                    DocumentsContract.buildRootsUri(SmbRoots.authority(context.getPackageName())), null);
         } catch (Throwable t) {
             DiagLog.e(AREA, "Cannot notify roots change", t);
         }
@@ -91,7 +98,7 @@ public final class SmbDocumentsProvider extends DocumentsProvider {
         try {
             SmbDocId id = SmbDocId.decode(documentId);
             SmbConnection c = connection(id);
-            MatrixCursor cursor = new MatrixCursor(DOCUMENT_COLUMNS);
+            MatrixCursor cursor = new MatrixCursor(projection == null ? DOCUMENT_COLUMNS : projection);
             if (id.isRoot()) {
                 addRow(cursor, SmbDocId.root(c.id), c.label(), true, 0, 0);
             } else {
@@ -113,14 +120,42 @@ public final class SmbDocumentsProvider extends DocumentsProvider {
             SmbDocId parent = SmbDocId.decode(parentDocumentId);
             SmbConnection c = connection(parent);
             List<SmbEntry> entries = SmbVfs.of(c).list(parent.path);
-            MatrixCursor cursor = new MatrixCursor(DOCUMENT_COLUMNS, entries.size());
+            MatrixCursor cursor = new MatrixCursor(projection == null ? DOCUMENT_COLUMNS : projection, entries.size());
             for (SmbEntry e : entries) {
                 addRow(cursor, SmbDocId.encode(c.id, SmbPath.join(parent.path, e.name)), e.name,
                         e.isDir, e.size, e.mtimeMillis);
             }
             return cursor;
         } catch (Throwable t) {
-            throw fail("queryChildDocuments", t);
+            String message = describe(t);
+            DiagLog.i(AREA, "SMB listing failed: " + message);
+            MatrixCursor empty = new MatrixCursor(projection == null ? DOCUMENT_COLUMNS : projection, 0);
+            Bundle extras = new Bundle();
+            extras.putString(DocumentsContract.EXTRA_ERROR, message);
+            empty.setExtras(extras);
+            if (Binder.getCallingUid() == Process.myUid()) showListError(message);
+            return empty;
+        }
+    }
+
+    private void showListError(String message) {
+        try {
+            Context context = getContext();
+            if (context == null) return;
+            long now = SystemClock.elapsedRealtime();
+            long previous = LAST_LIST_ERROR.get();
+            if (now - previous < 5_000 || !LAST_LIST_ERROR.compareAndSet(previous, now)) return;
+            new Handler(Looper.getMainLooper()).post(() -> {
+                try {
+                    Toast.makeText(context, (SettingsHooks.isJapanese(context)
+                            ? "SMB フォルダを読み込めません: " : "Could not load SMB folder: ") + message,
+                            Toast.LENGTH_SHORT).show();
+                } catch (Throwable error) {
+                    DiagLog.e(AREA, "Cannot show SMB listing error", error);
+                }
+            });
+        } catch (Throwable error) {
+            DiagLog.e(AREA, "Cannot post SMB listing error", error);
         }
     }
 
@@ -136,13 +171,11 @@ public final class SmbDocumentsProvider extends DocumentsProvider {
     @Override
     public ParcelFileDescriptor openDocument(String documentId, String mode, CancellationSignal signal)
             throws FileNotFoundException {
+        if (!"r".equals(mode)) throw readOnly();
         HandlerThread thread = null;
         try {
             requireBackgroundThread();
             if (Build.VERSION.SDK_INT < 26) throw new FileNotFoundException("Android 8 or later is required");
-            if (ParcelFileDescriptor.parseMode(mode) != ParcelFileDescriptor.MODE_READ_ONLY) {
-                throw new FileNotFoundException("SMB documents are read-only");
-            }
             SmbDocId id = SmbDocId.decode(documentId);
             if (id.isRoot()) throw new FileNotFoundException("Not a file");
             SmbConnection c = connection(id);
@@ -163,6 +196,41 @@ public final class SmbDocumentsProvider extends DocumentsProvider {
         }
     }
 
+    @Override
+    public String createDocument(String parentId, String mimeType, String name) throws FileNotFoundException {
+        throw readOnly();
+    }
+
+    @Override
+    public void deleteDocument(String documentId) throws FileNotFoundException {
+        throw readOnly();
+    }
+
+    @Override
+    public String renameDocument(String documentId, String name) throws FileNotFoundException {
+        throw readOnly();
+    }
+
+    @Override
+    public String moveDocument(String documentId, String sourceParentId, String targetParentId)
+            throws FileNotFoundException {
+        throw readOnly();
+    }
+
+    @Override
+    public String copyDocument(String documentId, String targetParentId) throws FileNotFoundException {
+        throw readOnly();
+    }
+
+    @Override
+    public void removeDocument(String documentId, String parentId) throws FileNotFoundException {
+        throw readOnly();
+    }
+
+    private static FileNotFoundException readOnly() {
+        return new FileNotFoundException("SMB documents are read-only");
+    }
+
     private static SmbConnection connection(SmbDocId id) throws FileNotFoundException {
         SmbConnection c = SmbConnectionStore.get(id.connectionId);
         if (c == null) throw new FileNotFoundException("Unknown SMB connection");
@@ -178,9 +246,14 @@ public final class SmbDocumentsProvider extends DocumentsProvider {
     /** Logs and converts any failure to the only exception type the provider may throw. */
     private static FileNotFoundException fail(String what, Throwable t) {
         if (t instanceof FileNotFoundException) return (FileNotFoundException) t;
-        String message = t instanceof IllegalArgumentException ? "Invalid SMB document" : SmbErrors.describe(t);
+        String message = describe(t);
         DiagLog.i(AREA, what + " failed: " + message);
         return new FileNotFoundException(message);
+    }
+
+    private static String describe(Throwable t) {
+        if (t instanceof FileNotFoundException && t.getMessage() != null) return t.getMessage();
+        return t instanceof IllegalArgumentException ? "Invalid SMB document" : SmbErrors.describe(t);
     }
 
     private static void addRow(MatrixCursor cursor, String documentId, String name, boolean dir, long size, long mtime) {

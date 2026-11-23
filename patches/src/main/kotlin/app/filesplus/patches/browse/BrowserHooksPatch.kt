@@ -106,6 +106,7 @@ internal class BrowserBindings(
     val storage: MutableClass,
     val storageFragment: MutableClass,
     val storagePeer: MethodReference,
+    val storageFolder: FieldReference,
     val filePopup: MutableMethod,
     val folderType: String,
     val attachStoragePaste: MutableMethod,
@@ -118,7 +119,7 @@ internal class BrowserBindings(
 private val bindingsByContext = WeakHashMap<BytecodePatchContext, BrowserBindings>()
 
 internal fun BytecodePatchContext.takeBrowserBindings(): BrowserBindings = synchronized(bindingsByContext) {
-    checkNotNull(bindingsByContext.remove(this)) { "Shared browser hooks were not installed" }
+    checkNotNull(bindingsByContext[this]) { "Shared browser hooks were not installed" }
 }
 
 private fun MutableClass.clipboardBridge(name: String, types: List<String>): MutableMethod {
@@ -208,6 +209,9 @@ internal val browserHooksPatch = bytecodePatch {
             invoke-virtual {p0}, $peer
             move-result-object v1
             invoke-virtual {v1, p1}, $optionsHelper
+            iget-object v2, v1, $folder
+            const/4 v3, 0x0
+            invoke-static {p1, v2, v3}, ${Constants.EXT}smb/SmbRoots;->filterMenu(${MENU}${OBJECT}${OBJECT})V
         """.trimIndent(), HOOK)
 
         val mediaView = uniqueMethod("media bar view") {
@@ -235,7 +239,7 @@ internal val browserHooksPatch = bytecodePatch {
 
         println("Browser hooks fingerprint media category field: 1 match ($category)")
         synchronized(bindingsByContext) {
-            bindingsByContext[this] = BrowserBindings(storage, storageFragment, peer, filePopup, folderType,
+            bindingsByContext[this] = BrowserBindings(storage, storageFragment, peer, folder, filePopup, folderType,
                 attachStoragePaste, optionsHelper, mediaOwner, fragment, rootView)
         }
     }
