@@ -4,11 +4,17 @@
 
 **再開したら、作業に入る前に必ず superpowers のスキルを Skill ツールで読み込むこと（ユーザー指示 2026-11-12。「superpowers に従っている感じがしない」との指摘）。** 最低限 `superpowers:using-superpowers` を読み、そのうえで作業に合うものを読み込んで従う（調査・設計のやり直し → `superpowers:brainstorming`／計画書 → `superpowers:writing-plans`／実装の配分 → `superpowers:subagent-driven-development`／レビュー → `superpowers:requesting-code-review`・`superpowers:receiving-code-review`／完了の判断 → `superpowers:verification-before-completion`）。「覚えているから読まなくてよい」とはしない。CLAUDE.md のユーザールールはスキルより優先。
 
+## 進行中（2026-11-23 夕方）— まずここ
+- **dev.19・dev.20 はカテゴリ（メディアブラウザ）を開くと落ちていた** → 原因と修正は **dev.21（0ab7f89 fix、merge 1def02c）**。Clipboard のフック（`afterBrowserMethod`）で、`addInstructions(index>0, smali)` がラベルを付け替えず分岐先がずれ、ART が `ixh`・`hul.U`・`htc.onCreateContextMenu`・`htp.a/b` を拒否していた。`addInstructionsWithLabels` に変えた。あわせて**クラッシュの記録**（`CrashLog`、診断の先頭に「前回のクラッシュ」）を足した。Opus レビュー承認、Minor は反映済み。
+- **エミュレーター**（ユーザー許可 2026-11-23）: AVD `fp31`（Android 12 x86_64、arm64 翻訳のみ → armeabi-v7a のライブラリは外して入れる）。`bash scripts/emu-verify.sh <mpp の絶対パス>` で全クラスの ART 検証（`Rejected methods: 0` 必須）。手動の操作用の補助は `build/emu/`（git 管理外: `t.sh` タップ＋画面、`find.sh` 文字の位置）。CLAUDE.md に手順を追記。
+- **Task 7（SMB をストレージブラウザで）は taiyo の実装が返ってきた（t20261123-150627-9、DONE_WITH_CONCERNS、11 Applied、JVM 170 PASS、dex 53,821）。未検証・未レビュー**。次の1手: screens の worktree に dev（修正）を取り込む（未コミットの変更があるので stash → merge dev → stash pop、`BrowserHooksPatch.kt` の衝突に注意）→ `task-7-verify.ps1` → `scripts/emu-verify.sh` → Opus レビュー → `feat:`。
+- ユーザーには dev.21 で直ったか実機で確かめてもらう（画像・ダウンロード・動画のカテゴリ、フォルダの長押し・︙）。
+
 ## 進行中（2026-11-20）
 - **Task 4 済み**（dev ca5a204 chore、merge 72a059a。未 push）。taiyo（codex-bridge）が直し 2 回、Opus の再レビューで承認。Minor は ledger（M1〜M16、R1〜R9）。
 - **Task 5 は 5a（切り取りの入口）と 5b（下端の貼り付けボタン・貼り付け先・設定ページ、feat）に分けた。**
 - **Task 5a 済み（2026-11-23、dev d3861ea chore、merge 42ed5b9。未 push）**。パッチ "Clipboard"（9 パッチ全部 Applied）。Opus レビュー → 直し 1 回 → 再レビューで承認。Minor は ledger。
-- **Task 6 済み（2026-11-23、dev 5cd589d feat、merge ca202f1、push 済み）**。taiyo の直し 1 回（t20261123-144424-7）→ 自分で task-6-verify.ps1（BUILD OK、10 Applied、全 fingerprint 1 match、自己テスト全 PASS、dex 53,767）→ Opus 再レビュー承認。Minor: `ViewSwitch.java:82` 生パスに `%XX` を含む名前を誤ってデコード／`SettingsInjectionPatch.kt:243` の fingerprint の行名が "Switch view"。実機で見る点: 切り替えのメニュー、ボリュームの一番上からの切り替え（「すべて」タブ）、戻るの動き。**次は計画の Task 7（SMB をストレージブラウザで、P4）**。
+- **Task 6 済み（2026-11-23、dev 5cd589d feat、merge ca202f1、push 済み）**。taiyo の直し 1 回（t20261123-144424-7）→ 自分で task-6-verify.ps1（BUILD OK、10 Applied、全 fingerprint 1 match、自己テスト全 PASS、dex 53,767）→ Opus 再レビュー承認。Minor: `ViewSwitch.java:82` 生パスに `%XX` を含む名前を誤ってデコード／`SettingsInjectionPatch.kt:243` の fingerprint の行名が "Switch view"。実機で見る点: 切り替えのメニュー、ボリュームの一番上からの切り替え（「すべて」タブ）、戻るの動き。**Task 7（SMB をストレージブラウザで、P4）を taiyo に送った（2026-11-23 15:06、t20261123-150627-9、gpt-6.2-sol/xhigh、指示書 `task-7-brief.md`）**。終わったら: 自分で `task-7-verify.ps1` → Opus レビュー（差分はファイルで）→ 直し → `feat:` でコミット・マージ・push。
 - （経緯）**（2026-11-23 11:20 利用枠 5h 81% で中断。リセット 14:20）Task 6（表示の切り替え）は実装済み・未コミット**（worktree `../ModdedFiles-wt/screens`）。taiyo（t20261123-105427-5、gpt-6.2-sol/high）が実装、自分で検証済み（BUILD OK、10 Applied、fingerprint 37 本すべて 1 match、自己テスト全部 PASS、dex 53,753）。Opus レビューは承認だが Important 1 件（I1: 画面の持ち主の Activity を許可リストで確かめていない → 置き換えで別の画面を閉じるおそれ）と Minor 5 件。
   **次の1手: 直しの指示書 `task-6-fix1-brief.md`（書き済み）を taiyo に `continue_task_id` t20261123-105427-5（model gpt-6.2-sol、effort high）で送る → 自分で `task-6-verify.ps1` → 小さい差分の再レビュー → `feat:` でコミット（`git -c core.autocrlf=true add`）→ dev にマージ → push（確認不要）。** 詳細は ledger。
 - dev は 2329214 まで push 済み（2026-11-23、ユーザー: push は確認不要）。main は未更新（安定版のマージはユーザーが決める）。
