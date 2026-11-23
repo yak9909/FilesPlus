@@ -1,4 +1,4 @@
-# 引き継ぎメモ（最終更新: 2026-11-12）
+# 引き継ぎメモ（最終更新: 2026-11-23）
 
 /clear のあとに作業を再開するためのメモ。まず `CLAUDE.md`（運用ルール）と `docs/WORKERS.md`（ワーカーのセッション）を読むこと。
 
@@ -7,7 +7,7 @@
 ## 進行中（2026-11-23 夕方）— まずここ
 - **dev.19・dev.20 はカテゴリ（メディアブラウザ）を開くと落ちていた** → 原因と修正は **dev.21（0ab7f89 fix、merge 1def02c）**。Clipboard のフック（`afterBrowserMethod`）で、`addInstructions(index>0, smali)` がラベルを付け替えず分岐先がずれ、ART が `ixh`・`hul.U`・`htc.onCreateContextMenu`・`htp.a/b` を拒否していた。`addInstructionsWithLabels` に変えた。あわせて**クラッシュの記録**（`CrashLog`、診断の先頭に「前回のクラッシュ」）を足した。Opus レビュー承認、Minor は反映済み。
 - **エミュレーター**（ユーザー許可 2026-11-23）: AVD `fp31`（Android 12 x86_64、arm64 翻訳のみ → armeabi-v7a のライブラリは外して入れる）。`bash scripts/emu-verify.sh <mpp の絶対パス>` で全クラスの ART 検証（`Rejected methods: 0` 必須）。手動の操作用の補助は `build/emu/`（git 管理外: `t.sh` タップ＋画面、`find.sh` 文字の位置）。CLAUDE.md に手順を追記。
-- **Task 7（SMB をストレージブラウザで）は taiyo の実装が返ってきた（t20261123-150627-9、DONE_WITH_CONCERNS、11 Applied、JVM 170 PASS、dex 53,821）。未検証・未レビュー**。次の1手: screens の worktree に dev（修正）を取り込む（未コミットの変更があるので stash → merge dev → stash pop、`BrowserHooksPatch.kt` の衝突に注意）→ `task-7-verify.ps1` → `scripts/emu-verify.sh` → Opus レビュー → `feat:`。
+- **Task 7（SMB をストレージブラウザで）は taiyo の実装が返ってきた（t20261123-150627-9）。dev を w/screens に取り込み済み（52ad3c9 へ早送り、Task 7 の未コミットの変更はそのまま）。`task-7-verify.ps1` は通る（11 Applied、dex 53,848）が、`scripts/emu-verify.sh` で ART が 2 つ拒否**: `hul.w`（末尾に足したコードが R8 に再利用された p0 を使う）と `SmbRoots.validRow`（生成したコードで v0 を int と object に使い回し）。直しの指示書 `task-7-fix1-brief.md` は書き済み。**taiyo は使用量の上限で 19:44 まで受付不可 → ユーザーの選択で待つ。19:44 に 1 回だけ再開の予約（CronCreate、e3928e3d）。taiyo がまだ受付不可なら過ぎるまで待ち、ほかの貸し手には回さない**。エミュレーターは起動したまま（止まっていたら `emulator -avd fp31 -no-snapshot -no-audio -gpu swiftshader_indirect` を裏で起動）。次の1手: `send_task(continue_task_id=t20261123-150627-9, model gpt-6.2-sol, effort high)` で指示書を送る → `task-7-verify.ps1` → `scripts/emu-verify.sh`（0 件）→ Opus レビュー → `feat:` → dev にマージ・push。
 - ユーザーには dev.21 で直ったか実機で確かめてもらう（画像・ダウンロード・動画のカテゴリ、フォルダの長押し・︙）。
 
 ## 進行中（2026-11-20）
