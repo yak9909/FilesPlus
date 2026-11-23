@@ -1,3 +1,10 @@
+## [1.0.0-dev.19](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.18...v1.0.0-dev.19) (2026-11-23)
+
+### ✨ New Features
+
+* Move FilesPlus settings into the app's settings screen and remove the look-alike screens ([cc51db4](https://github.com/yak9909/FilesPlus/commit/cc51db4884f31d9194b3ecc3a52fba07a85653a5))
+* Paste the clipboard from both browsers (Task 5b) ([b013584](https://github.com/yak9909/FilesPlus/commit/b01358402c013e91d2ff16109b44d65819b3d082))
+
 ## [1.0.0-dev.18](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.17...v1.0.0-dev.18) (2026-11-12)
 
 ### ✨ New Features

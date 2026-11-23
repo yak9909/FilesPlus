@@ -21,9 +21,9 @@ Click the button below, or manually add this repo url to Morphe Manager: https:/
 ## 🩹 Patches list
 
 <!-- PATCHES_START EXPANDED -->
-> **[v1.0.0-dev.18](https://github.com/yak9909/FilesPlus/releases/tag/v1.0.0-dev.18)**&nbsp;&nbsp;•&nbsp;&nbsp;`dev`&nbsp;&nbsp;•&nbsp;&nbsp;8 patches total
+> **[v1.0.0-dev.19](https://github.com/yak9909/FilesPlus/releases/tag/v1.0.0-dev.19)**&nbsp;&nbsp;•&nbsp;&nbsp;`dev`&nbsp;&nbsp;•&nbsp;&nbsp;9 patches total
 <details open>
-<summary>📦 Files by Google&nbsp;&nbsp;•&nbsp;&nbsp;8 patches</summary>
+<summary>📦 Files by Google&nbsp;&nbsp;•&nbsp;&nbsp;9 patches</summary>
 <br>
 
 **Package name:** `com.google.android.apps.nbu.files`
@@ -36,12 +36,13 @@ Click the button below, or manually add this repo url to Morphe Manager: https:/
 | 💊&nbsp;Patch | 📜&nbsp;Description | ⚙️&nbsp;Options |
 |----------|----------------|-----------|
 | [Change package name](#change-package-name) | Install Files alongside the system app with a different package name and label. | • Package name<br>• App label |
+| [Clipboard](#clipboard) | Cut and paste files from the app's browsers and preview. |  |
 | [Custom skip duration](#custom-skip-duration) | Customize double-tap and button skip durations; long-press a skip button to change its duration. Optionally, a double-tap rewind near the start goes to the start. |  |
 | [Delete folder from tabs](#delete-folder-from-tabs) | Move the current folder to the FilesPlus trash (kept 30 days) from category tabs, with confirmation and protected folders. |  |
+| [FilesPlus settings](#filesplus-settings) | Put FilesPlus settings and diagnostics in the app's original settings screens. |  |
 | [High-resolution playback](#high-resolution-playback) | Try videos beyond reported decoder limits, enable decoder fallback, and log playback diagnostics. |  |
-| [Move queue in preview](#move-queue-in-preview) | Add Send to… to the preview screen's menu to move the current file (or the selected files) to a folder in the background. Single files that are not playing move on to the next file at once; playing videos and multi-file sends are moved without changing the page. |  |
-| [Move to current tab](#move-to-current-tab) | Add a selection-mode menu item that moves the selected files into the folder of the current category tab. |  |
 | [Multi-select in preview](#multi-select-in-preview) | Add Select / Deselect items to the preview screen's menu to collect files while previewing, and select them in the list when you go back. |  |
+| [Open folder stack](#open-folder-stack) | Lets the storage browser open with a folder stack (volume root down to a folder) so that back and the breadcrumb work. Used by the other features that open the app's own screens. |  |
 | [Show empty folder tabs](#show-empty-folder-tabs) | Remember category folders and optionally append tabs for known folders with no matching files. |  |
 
 </details>
