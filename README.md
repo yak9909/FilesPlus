@@ -21,7 +21,7 @@ Click the button below, or manually add this repo url to Morphe Manager: https:/
 ## 🩹 Patches list
 
 <!-- PATCHES_START EXPANDED -->
-> **[v1.0.0-dev.20](https://github.com/yak9909/FilesPlus/releases/tag/v1.0.0-dev.20)**&nbsp;&nbsp;•&nbsp;&nbsp;`dev`&nbsp;&nbsp;•&nbsp;&nbsp;10 patches total
+> **[v1.0.0-dev.21](https://github.com/yak9909/FilesPlus/releases/tag/v1.0.0-dev.21)**&nbsp;&nbsp;•&nbsp;&nbsp;`dev`&nbsp;&nbsp;•&nbsp;&nbsp;10 patches total
 <details open>
 <summary>📦 Files by Google&nbsp;&nbsp;•&nbsp;&nbsp;10 patches</summary>
 <br>
