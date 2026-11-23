@@ -1,7 +1,7 @@
 {
-  "created_at": "2026-11-23T16:22:51",
-  "description": "## [1.0.0-dev.23](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.22...v1.0.0-dev.23) (2026-11-23)\n\n### ✨ New Features\n\n* Show empty folder tabs only in Downloads, judged by real contents ([dcd46b9](https://github.com/yak9909/FilesPlus/commit/dcd46b93df11f0d69d238803f666babeb6afb820))",
-  "download_url": "https://github.com/yak9909/FilesPlus/releases/download/v1.0.0-dev.23/patches-1.0.0-dev.23.mpp",
+  "created_at": "2026-11-23T17:18:56",
+  "description": "## [1.0.0-dev.24](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.23...v1.0.0-dev.24) (2026-11-23)\n\n### ✨ New Features\n\n* Add an Archives filter chip to the Downloads category ([e3d05e6](https://github.com/yak9909/FilesPlus/commit/e3d05e633cf1cd5e5d6b768e20f0196803ec1163))",
+  "download_url": "https://github.com/yak9909/FilesPlus/releases/download/v1.0.0-dev.24/patches-1.0.0-dev.24.mpp",
   "signature_download_url": "",
-  "version": "1.0.0-dev.23"
+  "version": "1.0.0-dev.24"
 }

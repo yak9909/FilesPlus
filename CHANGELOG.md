@@ -1,3 +1,9 @@
+## [1.0.0-dev.24](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.23...v1.0.0-dev.24) (2026-11-23)
+
+### ✨ New Features
+
+* Add an Archives filter chip to the Downloads category ([e3d05e6](https://github.com/yak9909/FilesPlus/commit/e3d05e633cf1cd5e5d6b768e20f0196803ec1163))
+
 ## [1.0.0-dev.23](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.22...v1.0.0-dev.23) (2026-11-23)
 
 ### ✨ New Features

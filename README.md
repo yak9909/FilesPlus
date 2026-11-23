@@ -21,9 +21,9 @@ Click the button below, or manually add this repo url to Morphe Manager: https:/
 ## 🩹 Patches list
 
 <!-- PATCHES_START EXPANDED -->
-> **[v1.0.0-dev.23](https://github.com/yak9909/FilesPlus/releases/tag/v1.0.0-dev.23)**&nbsp;&nbsp;•&nbsp;&nbsp;`dev`&nbsp;&nbsp;•&nbsp;&nbsp;11 patches total
+> **[v1.0.0-dev.24](https://github.com/yak9909/FilesPlus/releases/tag/v1.0.0-dev.24)**&nbsp;&nbsp;•&nbsp;&nbsp;`dev`&nbsp;&nbsp;•&nbsp;&nbsp;12 patches total
 <details open>
-<summary>📦 Files by Google&nbsp;&nbsp;•&nbsp;&nbsp;11 patches</summary>
+<summary>📦 Files by Google&nbsp;&nbsp;•&nbsp;&nbsp;12 patches</summary>
 <br>
 
 **Package name:** `com.google.android.apps.nbu.files`
@@ -35,6 +35,7 @@ Click the button below, or manually add this repo url to Morphe Manager: https:/
 
 | 💊&nbsp;Patch | 📜&nbsp;Description | ⚙️&nbsp;Options |
 |----------|----------------|-----------|
+| [Archives filter](#archives-filter) | Add a native Archives filter chip to the Downloads tabs. |  |
 | [Change package name](#change-package-name) | Install Files alongside the system app with a different package name and label. | • Package name<br>• App label |
 | [Clipboard](#clipboard) | Cut and paste files from the app's browsers and preview. |  |
 | [Custom skip duration](#custom-skip-duration) | Customize double-tap and button skip durations; long-press a skip button to change its duration. Optionally, a double-tap rewind near the start goes to the start. |  |
