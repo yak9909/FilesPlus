@@ -1,3 +1,9 @@
+## [1.0.0-dev.20](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.19...v1.0.0-dev.20) (2026-11-23)
+
+### ✨ New Features
+
+* Switch between the storage and media browsers (Task 6) ([5cd589d](https://github.com/yak9909/FilesPlus/commit/5cd589d0d54cd68d5d663ad7a32cc166003d45b1))
+
 ## [1.0.0-dev.19](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.18...v1.0.0-dev.19) (2026-11-23)
 
 ### ✨ New Features
