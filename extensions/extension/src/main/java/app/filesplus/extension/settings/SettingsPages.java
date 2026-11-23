@@ -415,6 +415,17 @@ public final class SettingsPages {
     }
 
     private void diagnostics() {
+        String crash = app.filesplus.extension.CrashLog.last();
+        if (crash != null) {
+            String firstLine = crash.split("\n", 2)[0];
+            row(screen, tr("前回のクラッシュ", "Last crash"), firstLine,
+                    () -> report(tr("前回のクラッシュ", "Last crash"), crash, true));
+            row(screen, tr("クラッシュの記録をコピー", "Copy crash record"), null, () -> copy("Last crash", crash));
+            row(screen, tr("クラッシュの記録を消す", "Dismiss crash record"), null, () -> {
+                app.filesplus.extension.CrashLog.clear();
+                activity.getWindow().getDecorView().post(activity::recreate);
+            });
+        }
         row(screen, tr("クリップボードのフック", "Clipboard hooks"),
                 app.filesplus.extension.clip.ClipHooks.installedHooks(), null);
         row(screen, tr("表示の切り替えのフック", "Switch view hooks"),
@@ -457,7 +468,9 @@ public final class SettingsPages {
             });
         }
         row(screen, tr("テキストで共有", "Share as text"), null, () ->
-                share(pageTitle(), deviceReport + "\n\n" + decoderReport + "\n\n" + logReport()));
+                share(pageTitle(), deviceReport + "\n\n" + decoderReport + "\n\n" + logReport()
+                        + (crash == null ? "" : "\n\nLast crash:\n"
+                                + (crash.length() > 12_000 ? crash.substring(0, 12_000) + "\n…" : crash))));
         row(screen, tr("ログを消去", "Clear log"), null, DiagLog::clear);
         row(screen, tr("ログ", "Log"), tr("タップで表示（新しい順）", "Tap to show (newest first)"),
                 () -> report(tr("診断ログ", "Diagnostic log"), logReport(), true));

@@ -13,7 +13,9 @@ public final class ModKit {
         try {
             if (appContext != null) return;
             appContext = context.getApplicationContext();
+            CrashLog.install(appContext);
             DiagLog.i("init", "ModKit initialized");
+            if (CrashLog.exists()) DiagLog.i("init", "A crash was recorded; see Diagnostics -> Last crash");
         } catch (Throwable t) {
             android.util.Log.e(TAG, "init failed", t);
         }
