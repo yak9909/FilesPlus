@@ -49,6 +49,7 @@ public final class PreviewHooks {
      */
     public static void onMenuCreated(View root, Menu menu, long id, boolean hasId, Object entry) {
         try {
+            if (app.filesplus.extension.smb.SmbRoots.isFile(entry)) return;
             if (menu == null) return;
             Context context = root != null ? root.getContext() : ModKit.context();
             ListHandoff.notePreviewActivity(activity(context));

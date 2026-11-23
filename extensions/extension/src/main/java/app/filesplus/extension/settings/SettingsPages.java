@@ -430,6 +430,18 @@ public final class SettingsPages {
                 app.filesplus.extension.clip.ClipHooks.installedHooks(), null);
         row(screen, tr("表示の切り替えのフック", "Switch view hooks"),
                 ViewSwitch.hookStatus(japanese), null);
+        boolean smbRoots = app.filesplus.extension.smb.SmbRoots.installed();
+        row(screen, tr("SMB のストレージブラウザフック", "SMB storage browser hooks"),
+                smbRoots ? tr("適用済み", "Installed") : tr("未適用", "Not installed"), null);
+        if (smbRoots) {
+            row(screen, tr("SMB をストレージブラウザで開く", "Open SMB in the storage browser"),
+                    null, () -> app.filesplus.extension.smb.SmbRoots.openFirst(activity));
+            row(screen, tr("壊れた SMB 引数を試す", "Try a broken SMB argument"), null, () -> {
+                boolean refused = app.filesplus.extension.smb.SmbRoots.selfTestBrokenRoot(activity);
+                DiagLog.i("smb", "Broken SMB argument refused: " + refused);
+                toast(refused ? tr("成功: 起動を拒否", "PASS: refused") : tr("失敗: 起動を拒否せず", "FAIL: not refused"));
+            });
+        }
         deviceReport = deviceReport();
         row(screen, tr("端末情報", "Device information"), deviceReport, () -> report(pageTitle(), deviceReport, true));
         Object codecs = row(screen, tr("動画デコーダー", "Video decoders"),

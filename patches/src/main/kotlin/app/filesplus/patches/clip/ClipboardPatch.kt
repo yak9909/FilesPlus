@@ -207,8 +207,15 @@ val clipboardPatch = bytecodePatch(
             :done
         """)
 
+        // When SMB runs first, the resource-bearing body is private and the caller invokes its wrapper.
+        val folderPopupEntry = storage.methods.one("storage folder popup entry") { method ->
+            if (AccessFlags.PRIVATE.isSet(folderPopup.accessFlags)) {
+                method.parameterTypes == folderPopup.parameterTypes && method.returnType == folderPopup.returnType &&
+                    method.calls().any { call -> call.toString() == folderPopup.toString() }
+            } else method == folderPopup
+        }
         val contextMenu = storageFragment.methods.one("storage folder long press") {
-            it.name == "onCreateContextMenu" && it.calls().any { call -> call.toString() == folderPopup.toString() }
+            it.name == "onCreateContextMenu" && it.calls().any { call -> call.toString() == folderPopupEntry.toString() }
         }
         val folderGuard = contextMenu.code().one("storage folder dropdown type guard") {
             it.opcode == Opcode.INSTANCE_OF && (it.ref() as? TypeReference)?.type != fileType
