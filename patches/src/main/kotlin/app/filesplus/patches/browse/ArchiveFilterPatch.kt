@@ -1,5 +1,6 @@
 package app.filesplus.patches.browse
 
+import app.filesplus.patches.foldertabs.folderTabContextPatch
 import app.filesplus.patches.misc.modKitIntegrationPatch
 import app.filesplus.patches.shared.Constants
 import app.morphe.patcher.extensions.InstructionExtensions.addInstructions
@@ -46,7 +47,8 @@ val archiveFilterPatch = bytecodePatch(
     default = true,
 ) {
     compatibleWith(Constants.COMPATIBILITY_FILES)
-    dependsOn(modKitIntegrationPatch, browserResources)
+    // Install the folder-tabs wrapper first so catalogue reloads also refresh its context.
+    dependsOn(modKitIntegrationPatch, browserResources, folderTabContextPatch)
 
     execute {
         val pagerId = browserResourceId("id/view_pager")
@@ -168,11 +170,16 @@ val archiveFilterPatch = bytecodePatch(
             it.parameterTypes == listOf(THROWABLE) && it.returnType == "V" &&
                 it.string("Error loading child containers for %s")
         }.definingClass)
-        val catalogueUpdate = catalogue.methods.one("tab catalogue value callback") {
+        val catalogueBody = catalogue.methods.one("tab catalogue value callback") {
             it.returnType == "V" && it.parameterTypes == listOf(OBJECT) && it.string("Failed to refresh the page.")
         }
+        val catalogueUpdate = catalogue.methods.one("folder-tabs catalogue wrapper") {
+            it.returnType == "V" && it.parameterTypes == listOf(OBJECT) &&
+                !AccessFlags.PRIVATE.isSet(it.accessFlags) &&
+                it.calls().any { call -> call.toString() == catalogueBody.toString() }
+        }
         val parent = catalogue.fields.single { it.type == pagerInit.definingClass }
-        val adapter = catalogueUpdate.fields().distinctBy { it.toString() }.single {
+        val adapter = catalogueBody.fields().distinctBy { it.toString() }.single {
             it.definingClass == parent.type && classDefByOrNull(it.type)?.superclass == adapterBase
         }
         val selectionPeer = selectionObserver.fields.single { it.type == peer }
@@ -328,21 +335,21 @@ private fun installArchiveCatalogue(
     update.name = "modKitArchiveOriginalTabs"
     update.accessFlags = PRIVATE
     owner.methods.add(update)
-    owner.archiveMethod(nameBefore, listOf(OBJECT), "V", 3, access, """
+    val catalogueCallback = owner.archiveMethod(nameBefore, listOf(OBJECT), "V", 3, access, """
         invoke-direct {p0, p1}, $prepare
         move-result-object v0
         invoke-direct {p0, v0}, $update
         return-void
     """)
-    owner.archiveMethod("modKitReloadArchives", emptyList(), "Z", 6, PUBLIC, """
+    // Re-enter the outer callback with the raw catalogue. It reapplies the filter and calls
+    // the folder-tabs wrapper, which publishes the refreshed tabs after the native update.
+    owner.archiveMethod("modKitReloadArchives", emptyList(), "Z", 5, PUBLIC, """
         iget-object v0, p0, $originalTabs
         if-eqz v0, :unavailable
         iget-object v1, p0, $parent
         iget-object v2, v1, $adapter
         if-eqz v2, :unavailable
-        invoke-direct {p0, v0}, $rewrite
-        move-result-object v3
-        invoke-direct {p0, v3}, $update
+        invoke-virtual {p0, v0}, $catalogueCallback
         invoke-virtual {v2}, $notify
         const/4 v0, 0x1
         return v0
