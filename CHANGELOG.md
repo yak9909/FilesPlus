@@ -1,3 +1,9 @@
+## [1.0.0-dev.34](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.33...v1.0.0-dev.34) (2026-11-24)
+
+### ✨ New Features
+
+* Copy files and folders into the clipboard and paste verified copies ([4a9a5cf](https://github.com/yak9909/FilesPlus/commit/4a9a5cf8430b94ac80e61130c67e0d38fb8669c9))
+
 ## [1.0.0-dev.33](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.32...v1.0.0-dev.33) (2026-11-24)
 
 ### ✨ New Features
