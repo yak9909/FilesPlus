@@ -39,7 +39,7 @@ public final class Clipboard {
      * another process is a paste that was cut short (the process died) and is moved to KEY_INTERRUPTED.
      */
     private static final String KEY_PASTE = "paste";
-    /** JSON array of cut-short pastes: {dest, at, reserved[], parts[], toasted}. Kept until the user dismisses them. */
+    /** JSON array of cut-short pastes: {dest, at, reserved[], parts[], partFolders[], toasted}. Kept until the user dismisses them. */
     private static final String KEY_INTERRUPTED = "interrupted";
     private static final int MAX_INTERRUPTED = 20;
     static final long MAX_AGE_MS = 24L * 60 * 60 * 1000;
@@ -151,7 +151,7 @@ public final class Clipboard {
 
     // ---- paste marker (an interrupted paste is never resumed automatically) ----------------------------------
 
-    /** A paste that was cut short by the process dying (ColorOS). Only recorded temporary files can be cleaned on startup. */
+    /** A paste that was cut short by the process dying (ColorOS). Only recorded temporary entries can be cleaned on startup. */
     public static final class Interrupted {
         /** The folder the paste was going into. */
         public final String destination;
@@ -163,18 +163,21 @@ public final class Clipboard {
         public final List<String> reserved;
         /** Exact paths of temporary files still eligible for startup cleanup. */
         public final List<String> parts;
+        public final List<String> partFolders;
         /** The "interrupted" toast was already shown for it. */
         public final boolean toasted;
 
         Interrupted(String destination, long at, List<String> reserved, boolean toasted) {
-            this(destination, at, reserved, Collections.emptyList(), toasted);
+            this(destination, at, reserved, Collections.emptyList(), Collections.emptyList(), toasted);
         }
 
-        Interrupted(String destination, long at, List<String> reserved, List<String> parts, boolean toasted) {
+        Interrupted(String destination, long at, List<String> reserved, List<String> parts,
+                    List<String> partFolders, boolean toasted) {
             this.destination = destination;
             this.at = at;
             this.reserved = Collections.unmodifiableList(reserved);
             this.parts = Collections.unmodifiableList(parts);
+            this.partFolders = Collections.unmodifiableList(partFolders);
             this.toasted = toasted;
         }
     }
@@ -215,11 +218,15 @@ public final class Clipboard {
     }
 
     public static boolean recordPart(Context context, long token, String path) {
-        return changeName(context, token, "parts", path, true);
+        return recordPart(context, token, path, false);
     }
 
-    public static void forgetPart(Context context, long token, String path) {
-        changeName(context, token, "parts", path, false);
+    public static boolean recordPart(Context context, long token, String path, boolean directory) {
+        return changeName(context, token, directory ? "partFolders" : "parts", path, true);
+    }
+
+    public static void forgetPart(Context context, long token, String path, boolean directory) {
+        changeName(context, token, directory ? "partFolders" : "parts", path, false);
     }
 
     private static void changeReserved(Context context, long token, String path, boolean add) {
@@ -258,7 +265,7 @@ public final class Clipboard {
                 JSONObject all = readObject(prefs, KEY_PASTE);
                 String key = PROCESS + ":" + token;
                 JSONObject record = all.optJSONObject(key);
-                if (record != null && !names(record, "parts").isEmpty()) record.put("proc", "");
+                if (record != null && hasParts(record)) record.put("proc", "");
                 else all.remove(key);
                 SharedPreferences.Editor editor = prefs.edit();
                 if (all.length() == 0) editor.remove(KEY_PASTE);
@@ -290,7 +297,7 @@ public final class Clipboard {
         for (int i = 0; i < list.length(); i++) {
             JSONObject o = list.getJSONObject(i);
             out.add(new Interrupted(o.optString("dest", ""), o.optLong("at", 0),
-                    names(o, "reserved"), names(o, "parts"), o.optBoolean("toasted", false)));
+                    names(o, "reserved"), names(o, "parts"), names(o, "partFolders"), o.optBoolean("toasted", false)));
         }
         return out;
     }
@@ -317,7 +324,7 @@ public final class Clipboard {
                 JSONArray list = readArray(prefs, KEY_INTERRUPTED);
                 for (int i = list.length() - 1; i >= 0; i--) {
                     JSONObject record = list.optJSONObject(i);
-                    if (record != null && names(record, "parts").isEmpty()) list.remove(i);
+                    if (record != null && !hasParts(record)) list.remove(i);
                 }
                 if (!prefs.edit().putString(KEY_INTERRUPTED, list.toString()).commit()) {
                     DiagLog.e(AREA, "Cannot dismiss interrupted pastes", null);
@@ -341,9 +348,10 @@ public final class Clipboard {
 
             Map<String, Set<String>> resolved = new LinkedHashMap<>();
             for (Interrupted record : snapshot) {
-                if (record.parts.isEmpty()) continue;
-                List<String> remaining = InterruptedPastes.cleanParts(context, record.destination, record.parts);
+                if (record.parts.isEmpty() && record.partFolders.isEmpty()) continue;
+                List<String> remaining = InterruptedPastes.cleanParts(context, record);
                 Set<String> removed = new HashSet<>(record.parts);
+                removed.addAll(record.partFolders);
                 removed.removeAll(remaining);
                 if (!removed.isEmpty()) resolved.computeIfAbsent(record.destination, key -> new HashSet<>())
                         .addAll(removed);
@@ -358,10 +366,12 @@ public final class Clipboard {
                     JSONObject record = list.getJSONObject(i);
                     Set<String> removed = resolved.get(record.optString("dest"));
                     if (removed == null) continue;
-                    List<String> parts = names(record, "parts");
-                    if (!parts.removeAll(removed)) continue;
-                    record.put("parts", new JSONArray(parts));
-                    changed = true;
+                    for (String field : new String[]{"parts", "partFolders"}) {
+                        List<String> parts = names(record, field);
+                        if (!parts.removeAll(removed)) continue;
+                        record.put(field, new JSONArray(parts));
+                        changed = true;
+                    }
                 }
                 if (changed && !prefs.edit().putString(KEY_INTERRUPTED, list.toString()).commit()) {
                     DiagLog.e(AREA, "Cannot save interrupted move cleanup", null);
@@ -370,6 +380,10 @@ public final class Clipboard {
         } catch (Throwable t) {
             DiagLog.e(AREA, "Cannot recover interrupted moves", t);
         }
+    }
+
+    private static boolean hasParts(JSONObject record) {
+        return !names(record, "parts").isEmpty() || !names(record, "partFolders").isEmpty();
     }
 
     private static List<String> names(JSONObject record, String field) {
@@ -400,13 +414,15 @@ public final class Clipboard {
                 list.put(new JSONObject().put("dest", record.optString("dest", "")).put("at", record.optLong("at", 0))
                         .put("reserved", record.optJSONArray("reserved") == null ? new JSONArray()
                                 : record.optJSONArray("reserved"))
-                        .put("parts", new JSONArray(names(record, "parts"))).put("toasted", process.isEmpty()));
+                        .put("parts", new JSONArray(names(record, "parts")))
+                        .put("partFolders", new JSONArray(names(record, "partFolders")))
+                        .put("toasted", process.isEmpty()));
                 moved = true;
             }
         }
         if (!moved) return;
         for (int i = 0; list.length() > MAX_INTERRUPTED && i < list.length();) {
-            if (names(list.getJSONObject(i), "parts").isEmpty()) list.remove(i);
+            if (!hasParts(list.getJSONObject(i))) list.remove(i);
             else i++;
         }
         SharedPreferences.Editor editor = prefs.edit().putString(KEY_INTERRUPTED, list.toString());

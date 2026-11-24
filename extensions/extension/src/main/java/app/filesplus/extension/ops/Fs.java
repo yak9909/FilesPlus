@@ -45,6 +45,18 @@ public interface Fs {
         void sync() throws IOException;
     }
 
+    /** Holds an open directory. Use its path for child access while the handle is open. */
+    interface Directory extends Closeable {
+        String path();
+    }
+
+    /** Opens the expected directory without following a link at its name. */
+    Directory openDirectory(String path, Stat expected) throws IOException;
+
+    /** Creates a directory exclusively and returns its identity. */
+    Stat mkdir(String path) throws IOException;
+    void rmdir(String path) throws IOException;
+
     /** No link following. Null only for a missing path. */
     Stat lstat(String path) throws IOException;
 
@@ -56,9 +68,11 @@ public interface Fs {
 
     String child(String folder, String name);
     List<String> list(String folder) throws IOException;
+    List<String> list(String folder, int limit) throws IOException;
     long freeSpace(String folder) throws IOException;
     void rename(String from, String to) throws IOException;
     void syncDirectory(String folder) throws IOException;
+    /** Removes a non-directory entry itself, without following links. */
     void unlink(String path) throws IOException;
     void setMtime(String path, FileTime mtime) throws IOException;
 

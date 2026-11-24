@@ -2,8 +2,6 @@ package app.filesplus.extension.clip;
 
 import android.content.Context;
 
-import app.filesplus.extension.foldertabs.TabMove;
-
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -18,7 +16,7 @@ import java.util.Locale;
  * but never changes anything.
  *
  * <p>Reasons are checked in this order: EMPTY, SMB, ALL_TAB_DISABLED, PROTECTED, INTO_SELF, SAME_FOLDER,
- * NOT_WRITABLE, CROSS_VOLUME, TOO_LARGE. Items that no longer exist are not a reason: a paste skips and counts
+ * NOT_WRITABLE, TOO_LARGE. Items that no longer exist are not a reason: a paste skips and counts
  * them. A paste where only some items are already in the folder is allowed (those are skipped).
  */
 public final class PasteRules {
@@ -38,8 +36,6 @@ public final class PasteRules {
         NOT_WRITABLE,
         /** Android/ or .FilesPlus (including everything below them), or a place outside the storage volumes. */
         PROTECTED,
-        /** A folder lives on another storage volume than the target (waits for S4b). */
-        CROSS_VOLUME,
         /**
          * More than {@link #MAX_ITEMS} entries or more than {@link #MAX_BYTES} in total, folders counted with their
          * contents, or a folder that was not measured (waits for S6).
@@ -107,7 +103,6 @@ public final class PasteRules {
         }
 
         List<File> sources = new ArrayList<>();
-        boolean crossVolumeFolder = false;
         int inTarget = 0;
         for (ClipItem item : state.items) {
             File raw = new File(item.path());
@@ -118,14 +113,12 @@ public final class PasteRules {
             sources.add(source);
             if (item.isDir() || Files.isDirectory(source.toPath(), LinkOption.NOFOLLOW_LINKS)) {
                 if (within(destCanonical, source)) return Result.refused(Reason.INTO_SELF);
-                if (!same(volume, destVolume)) crossVolumeFolder = true;
             }
             if (same(source.getParentFile(), destCanonical)) inTarget++;
         }
         if (!sources.isEmpty() && inTarget == sources.size()) return Result.refused(Reason.SAME_FOLDER);
 
         if (!writable(dest, target.createIfMissing())) return Result.refused(Reason.NOT_WRITABLE);
-        if (crossVolumeFolder) return Result.refused(Reason.CROSS_VOLUME);
         if (tooLarge(state)) return Result.refused(Reason.TOO_LARGE);
         return Result.ok();
     }
@@ -246,8 +239,6 @@ public final class PasteRules {
             case PROTECTED:
                 return ja ? "この場所（Android・.FilesPlus など）には貼り付けられません"
                         : "Cannot paste here (Android, .FilesPlus and similar)";
-            case CROSS_VOLUME:
-                return TabMove.crossVolumeNote(ja);
             case TOO_LARGE:
                 return ja ? "一度に貼り付けられるのは、フォルダの中身も含めて 50 件・100MB までです。選ぶ数を減らしてください"
                         : "At most 50 items / 100MB (folder contents included) can be pasted at once. Please select fewer";

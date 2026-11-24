@@ -14,12 +14,14 @@ import java.util.regex.Pattern;
 
 /** Copies one regular file and publishes it only after a complete SHA-256 readback. */
 public final class VerifiedCopy {
-    private static final int CHUNK = 1024 * 1024;
+    static final int CHUNK = 1024 * 1024;
     private static final long HEADROOM = 64L * CHUNK;
     public static final int MAX_NAME_ATTEMPTS = 1000;
     private static final Pattern PART = Pattern.compile("\\.filesplus-[0-9a-f]{32}-[0-9]+\\.part");
 
-    public enum Reason { HASH_MISMATCH, SIZE_MISMATCH, SOURCE_CHANGED, IO, NO_SPACE, NAME_INVALID, CANCELLED }
+    public enum Reason {
+        HASH_MISMATCH, SIZE_MISMATCH, SOURCE_CHANGED, IO, NO_SPACE, NAME_INVALID, CANCELLED, LINK, TOP_LEVEL_LINK, TOO_LARGE
+    }
 
     public interface Cancellation {
         boolean cancelled();
@@ -38,6 +40,11 @@ public final class VerifiedCopy {
         private int consecutiveHashFailures;
 
         public boolean stopped() { return consecutiveHashFailures >= 2; }
+
+        void finish(Reason reason, Observer observer) {
+            consecutiveHashFailures = reason == Reason.HASH_MISMATCH ? consecutiveHashFailures + 1 : 0;
+            if (stopped()) observer.log("HASH_MISMATCH: stopping the job after two consecutive failed items", null);
+        }
     }
 
     public static final class Result {
@@ -58,11 +65,13 @@ public final class VerifiedCopy {
         public boolean succeeded() { return reason == null; }
     }
 
-    private static final class Failed extends IOException {
+    static final class Failed extends IOException {
         final Reason reason;
 
-        Failed(Reason reason) {
-            super(reason.name());
+        Failed(Reason reason) { this(reason, reason.name()); }
+
+        Failed(Reason reason, String detail) {
+            super(detail);
             this.reason = reason;
         }
     }
@@ -83,7 +92,7 @@ public final class VerifiedCopy {
                 : name + " (" + n + ")";
     }
 
-    private static void checkName(String name, boolean removable) throws Failed {
+    static void checkName(String name, boolean removable) throws Failed {
         if (name.isEmpty() || name.equals(".") || name.equals("..") || name.indexOf('/') >= 0
                 || name.indexOf(0) >= 0 || mediaStoreName(name)
                 || name.getBytes(StandardCharsets.UTF_8).length > 255
@@ -95,7 +104,7 @@ public final class VerifiedCopy {
 
     public static Result copy(Fs srcFs, String source, Fs dstFs, String folder, String name,
                               boolean removable, Job job, Cancellation cancellation, Observer observer) {
-        String opId = UUID.randomUUID().toString().replace("-", "");
+        String opId = newOpId();
         Fs.Stat initial = null;
         Reason reason = Reason.IO;
         if (job.stopped()) {
@@ -109,84 +118,119 @@ public final class VerifiedCopy {
                 if (current == null || current.type != Fs.Type.FILE) throw new Failed(Reason.IO);
                 initial = current;
                 checkName(name, removable);
-                long free = dstFs.freeSpace(folder);
-                if (free < HEADROOM || initial.size > free - HEADROOM) throw new Failed(Reason.NO_SPACE);
+                checkSpace(dstFs, folder, initial.size);
                 String target = once(srcFs, source, dstFs, folder, name, removable, initial,
                         opId, attempt, cancellation, observer);
-                job.consecutiveHashFailures = 0;
+                job.finish(null, observer);
                 return new Result(target, opId, initial, null);
             } catch (IOException e) {
-                reason = e instanceof Failed ? ((Failed) e).reason : e instanceof Fs.NoSpace ? Reason.NO_SPACE
-                        : Reason.IO;
+                reason = reason(e);
                 observer.log(reason + " on attempt " + (attempt + 1) + " for " + source, e);
-                if (reason != Reason.HASH_MISMATCH && reason != Reason.IO) break;
+                if (!retryable(reason)) break;
             }
         }
-        job.consecutiveHashFailures = reason == Reason.HASH_MISMATCH ? job.consecutiveHashFailures + 1 : 0;
-        if (job.stopped()) observer.log("HASH_MISMATCH: stopping the job after two consecutive failed items", null);
+        job.finish(reason, observer);
         return new Result(null, opId, initial, reason);
     }
 
     private static String once(Fs srcFs, String source, Fs dstFs, String folder, String name,
                                boolean removable, Fs.Stat initial, String opId, int attempt,
                                Cancellation cancellation, Observer observer) throws IOException {
-        String part = dstFs.child(folder, ".filesplus-" + opId + "-" + attempt + ".part");
-        Fs.Stat owned = null;
-        boolean recorded = false;
-        boolean created = false;
+        String part = dstFs.child(folder, partName(opId, attempt));
+        Part ownership = new Part();
         boolean committed = false;
         try {
-            checkAvailableName(dstFs, folder, name, removable);
-            byte[] buffer = new byte[CHUNK];
-            MessageDigest original = sha256();
-            long bytes;
-            InputStream input;
-            try {
-                input = srcFs.openRead(source, initial, true);
-            } catch (Fs.SourceChanged e) {
-                throw new Failed(Reason.SOURCE_CHANGED);
-            }
-            try (InputStream in = input) {
-                if (dstFs.lstat(part) != null) throw new FileAlreadyExistsException(part);
-                observer.partStarted(part);
-                recorded = true;
-                try (Fs.Writer out = dstFs.createExclusive(part)) {
-                    created = true;
-                    owned = out.stat();
-                    bytes = stream(in, out, original, buffer, cancellation);
-                    out.sync();
-                }
-            }
-            if (!initial.unchanged(srcFs.lstat(source))) throw new Failed(Reason.SOURCE_CHANGED);
+            checkAvailableName(dstFs, folder, name, false, removable);
+            Fs.Stat written = writeVerified(srcFs, source, initial, dstFs, part, new byte[CHUNK],
+                    ownership, cancellation, observer);
 
-            Fs.Stat written = dstFs.lstat(part);
-            if (!owned.sameFile(written)) throw new Failed(Reason.IO);
-            MessageDigest readback = sha256();
-            long verifiedBytes;
-            try (InputStream in = dstFs.openRead(part, written, false)) {
-                verifiedBytes = stream(in, null, readback, buffer, cancellation);
-            }
-            if (bytes != initial.size || verifiedBytes != bytes) throw new Failed(Reason.SIZE_MISMATCH);
-            if (!MessageDigest.isEqual(original.digest(), readback.digest())) throw new Failed(Reason.HASH_MISMATCH);
-
-            // Recheck both entries before replacing the empty reservation.
             String target = publish(dstFs, folder, name, removable, part, written, cancellation, observer);
             committed = true;
-            try {
-                dstFs.syncDirectory(folder);
-            } catch (Throwable t) {
-                observer.log("Cannot sync the destination directory " + folder, t);
-            }
-            try {
-                dstFs.setMtime(target, initial.mtime);
-            } catch (IOException | RuntimeException e) {
-                observer.log("Cannot set mtime on " + target, e);
-            }
+            syncDirectory(dstFs, folder, observer);
+            setMtime(dstFs, target, initial, observer);
             return target;
         } finally {
-            if (recorded && (committed || !created || removePart(dstFs, part, owned, observer))) {
+            if (ownership.recorded && (committed || !ownership.created
+                    || removePart(dstFs, part, ownership.owned, observer))) {
                 observer.partFinished(part);
             }
+        }
+    }
+
+    static final class Part {
+        boolean recorded;
+        boolean created;
+        Fs.Stat owned;
+    }
+
+    /** A staged file can use its exact name when its enclosing directory is the unpublished part. */
+    static Fs.Stat writeVerified(Fs srcFs, String source, Fs.Stat initial, Fs dstFs, String part,
+                                 byte[] buffer, Part ownership, Cancellation cancellation, Observer recorder)
+            throws IOException {
+        MessageDigest original = sha256();
+        long bytes;
+        InputStream input;
+        try {
+            input = srcFs.openRead(source, initial, true);
+        } catch (Fs.SourceChanged e) {
+            throw new Failed(Reason.SOURCE_CHANGED, "Source changed: " + source);
+        }
+        try (InputStream in = input) {
+            if (dstFs.lstat(part) != null) throw new FileAlreadyExistsException(part);
+            if (recorder != null) {
+                recorder.partStarted(part);
+                ownership.recorded = true;
+            }
+            try (Fs.Writer out = dstFs.createExclusive(part)) {
+                ownership.created = true;
+                ownership.owned = out.stat();
+                bytes = stream(in, out, original, buffer, cancellation);
+                out.sync();
+            }
+        }
+        if (!initial.unchanged(srcFs.lstat(source))) throw new Failed(Reason.SOURCE_CHANGED, "Source changed: " + source);
+        Fs.Stat written = dstFs.lstat(part);
+        if (!ownership.owned.sameFile(written)) throw new Failed(Reason.IO);
+        MessageDigest readback = sha256();
+        long verifiedBytes;
+        try (InputStream in = dstFs.openRead(part, written, false)) {
+            verifiedBytes = stream(in, null, readback, buffer, cancellation);
+        }
+        if (bytes != initial.size || verifiedBytes != bytes) throw new Failed(Reason.SIZE_MISMATCH);
+        if (!MessageDigest.isEqual(original.digest(), readback.digest())) throw new Failed(Reason.HASH_MISMATCH);
+        return written;
+    }
+
+    static String newOpId() { return UUID.randomUUID().toString().replace("-", ""); }
+
+    static String partName(String opId, int attempt) { return ".filesplus-" + opId + "-" + attempt + ".part"; }
+
+    static void checkSpace(Fs fs, String folder, long bytes) throws IOException {
+        long free = fs.freeSpace(folder);
+        if (free < HEADROOM || bytes > free - HEADROOM) throw new Failed(Reason.NO_SPACE);
+    }
+
+    static Reason reason(IOException error) {
+        if (error instanceof Failed) return ((Failed) error).reason;
+        if (error instanceof Fs.NoSpace) return Reason.NO_SPACE;
+        return Reason.IO;
+    }
+
+    static boolean retryable(Reason reason) { return reason == Reason.HASH_MISMATCH || reason == Reason.IO; }
+
+    static void syncDirectory(Fs fs, String folder, Observer observer) {
+        try {
+            fs.syncDirectory(folder);
+        } catch (Throwable t) {
+            observer.log("Cannot sync the destination directory " + folder, t);
+        }
+    }
+
+    static void setMtime(Fs fs, String path, Fs.Stat original, Observer observer) {
+        try {
+            fs.setMtime(path, original.mtime);
+        } catch (IOException | RuntimeException e) {
+            observer.log("Cannot set mtime on " + path, e);
         }
     }
 
@@ -204,7 +248,7 @@ public final class VerifiedCopy {
         }
     }
 
-    private static void checkCancelled(Cancellation cancellation) throws Failed {
+    static void checkCancelled(Cancellation cancellation) throws Failed {
         if (cancellation.cancelled()) throw new Failed(Reason.CANCELLED);
     }
 
@@ -216,17 +260,18 @@ public final class VerifiedCopy {
         }
     }
 
-    private static Set<String> names(Fs fs, String folder) throws IOException {
+    static Set<String> names(Fs fs, String folder) throws IOException {
         Set<String> names = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
         names.addAll(fs.list(folder));
         return names;
     }
 
     /** A candidate is checked before copying, including any conflict suffix that would extend its UTF-8 length. */
-    private static void checkAvailableName(Fs fs, String folder, String name, boolean removable) throws IOException {
+    static void checkAvailableName(Fs fs, String folder, String name, boolean directory, boolean removable)
+            throws IOException {
         Set<String> existing = names(fs, folder);
         for (int n = 0; n < MAX_NAME_ATTEMPTS; n++) {
-            String candidate = candidate(name, false, n);
+            String candidate = candidate(name, directory, n);
             checkName(candidate, removable);
             if (!existing.contains(candidate)) return;
         }
@@ -251,13 +296,7 @@ public final class VerifiedCopy {
                     continue;
                 }
                 checkCancelled(cancellation);
-                for (String entry : fs.list(folder)) {
-                    if (!candidate.equals(entry) && candidate.equalsIgnoreCase(entry)) {
-                        existing.add(candidate);
-                        break;
-                    }
-                }
-                if (existing.contains(candidate)) continue;
+                if (hasCaseClash(fs, folder, candidate)) continue;
                 if (!verified.sameFileAndSize(fs.lstat(part))) throw new Failed(Reason.IO);
                 Fs.Stat current = fs.lstat(target);
                 if (!reservation.sameFile(current) || current.size != 0) {
@@ -275,7 +314,14 @@ public final class VerifiedCopy {
         throw new Failed(Reason.IO);
     }
 
-    private static boolean removePart(Fs fs, String path, Fs.Stat owned, Observer observer) {
+    static boolean hasCaseClash(Fs fs, String folder, String name) throws IOException {
+        for (String entry : fs.list(folder)) {
+            if (!name.equals(entry) && name.equalsIgnoreCase(entry)) return true;
+        }
+        return false;
+    }
+
+    static boolean removePart(Fs fs, String path, Fs.Stat owned, Observer observer) {
         try {
             Fs.Stat current = fs.lstat(path);
             if (current == null) return true;

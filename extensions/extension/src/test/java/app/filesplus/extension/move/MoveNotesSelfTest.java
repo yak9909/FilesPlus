@@ -31,17 +31,35 @@ public final class MoveNotesSelfTest {
                 "Names with characters the SD card cannot store (\" * : < > ? \\ |) or a trailing dot/space cannot be moved"
                         + "\nNot enough free space at the destination"
                         + "\nStopped: written data failed verification (check the SD card)"
-                        + "\nThe original file was kept\n", false, result);
+                        + "\nThe original was kept\n", false, result);
         expect("all Japanese notes",
                 "SD カードで使えない文字（\" * : < > ? \\ |）や末尾の点・空白を含む名前は移動できません"
                         + "\n移動先の空き容量が足りません"
                         + "\n書き込みの検証に失敗したため残りを止めました（SD カードを確かめてください）"
-                        + "\n元のファイルは残しました\n", true, result);
+                        + "\n元のファイル・フォルダは残しました\n", true, result);
+
+        TabMove.Result refusedLink = new TabMove.Result();
+        refusedLink.reasons.add(VerifiedCopy.Reason.TOP_LEVEL_LINK);
+        expect("top-level link note in English", "Links cannot be moved\n", false, refusedLink);
+        expect("top-level link note in Japanese", "リンクは移動できません\n", true, refusedLink);
+
+        TabMove.Result refusedFolder = new TabMove.Result();
+        refusedFolder.reasons.add(VerifiedCopy.Reason.LINK);
+        refusedFolder.reasons.add(VerifiedCopy.Reason.TOO_LARGE);
+        expect("folder refusal notes in English",
+                "Folders that contain links or other storage cannot be moved\n"
+                        + "The folder has too many items or is nested too deeply to move\n",
+                false, refusedFolder);
+        expect("folder refusal notes in Japanese",
+                "リンクや別のストレージを含むフォルダは移動できません\n"
+                        + "フォルダの項目が多すぎるか深すぎるため移動できません\n",
+                true, refusedFolder);
 
         TabMove.Result retained = new TabMove.Result();
         retained.moved = 1;
         retained.sourceKept = true;
-        expect("source kept after success", "The original file was kept\n", false, retained);
+        expect("source kept after success", "The original was kept\n", false, retained);
+        expect("source kept after success in Japanese", "元のファイル・フォルダは残しました\n", true, retained);
         System.out.println("Move result notes: ALL PASS (" + checks + " checks)");
     }
 }

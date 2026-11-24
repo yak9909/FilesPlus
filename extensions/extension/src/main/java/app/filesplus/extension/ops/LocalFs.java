@@ -1,5 +1,6 @@
 package app.filesplus.extension.ops;
 
+import android.os.ParcelFileDescriptor;
 import android.os.StatFs;
 import android.system.ErrnoException;
 import android.system.Os;
@@ -11,6 +12,7 @@ import java.io.FileDescriptor;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.DirectoryIteratorException;
+import java.nio.file.DirectoryNotEmptyException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
@@ -44,6 +46,53 @@ public final class LocalFs implements Fs {
         return new Stat(type, value.st_size,
                 FileTime.from(Instant.ofEpochSecond(value.st_mtim.tv_sec, value.st_mtim.tv_nsec)),
                 value.st_ino, value.st_dev);
+    }
+
+    @Override public Directory openDirectory(String path, Stat expected) throws IOException {
+        FileDescriptor fd;
+        try {
+            fd = Os.open(path, OPEN_FLAGS | OsConstants.O_RDONLY | OsConstants.O_NONBLOCK, 0);
+        } catch (ErrnoException e) {
+            throw io(e, path);
+        }
+        try {
+            Stat opened = stat(Os.fstat(fd));
+            if (opened.type != Type.DIRECTORY || !expected.sameFile(opened)) {
+                throw new SourceChanged(path);
+            }
+            // The public SDK has no openat. A held descriptor anchors child paths to this directory.
+            ParcelFileDescriptor handle = ParcelFileDescriptor.dup(fd);
+            return new Directory() {
+                @Override public String path() { return "/proc/self/fd/" + handle.getFd() + "/."; }
+                @Override public void close() throws IOException { handle.close(); }
+            };
+        } catch (ErrnoException e) {
+            throw io(e, path);
+        } finally {
+            close(fd, path);
+        }
+    }
+
+    @Override public Stat mkdir(String path) throws IOException {
+        try {
+            Os.mkdir(path, 0777);
+        } catch (ErrnoException e) {
+            if (e.errno == OsConstants.EEXIST) throw new FileAlreadyExistsException(path);
+            throw io(e, path);
+        }
+        Stat created = lstat(path);
+        if (created == null || created.type != Type.DIRECTORY) throw new SourceChanged(path);
+        return created;
+    }
+
+    @Override public void rmdir(String path) throws IOException {
+        try {
+            // The trailing slash makes remove act only on a directory entry.
+            Os.remove(path + "/");
+        } catch (ErrnoException e) {
+            if (e.errno == OsConstants.ENOENT) return;
+            throw io(e, path);
+        }
     }
 
     @Override public InputStream openRead(String path, Stat expected, boolean checkMtime) throws IOException {
@@ -139,9 +188,16 @@ public final class LocalFs implements Fs {
     @Override public String child(String folder, String name) { return new File(folder, name).getPath(); }
 
     @Override public List<String> list(String folder) throws IOException {
+        return list(folder, Integer.MAX_VALUE);
+    }
+
+    @Override public List<String> list(String folder, int limit) throws IOException {
         List<String> names = new ArrayList<>();
         try (DirectoryStream<Path> entries = Files.newDirectoryStream(new File(folder).toPath())) {
-            for (Path entry : entries) names.add(entry.getFileName().toString());
+            for (Path entry : entries) {
+                names.add(entry.getFileName().toString());
+                if (names.size() == limit) break;
+            }
         } catch (DirectoryIteratorException e) {
             throw e.getCause();
         }
@@ -160,6 +216,8 @@ public final class LocalFs implements Fs {
         try {
             Os.rename(from, to);
         } catch (ErrnoException e) {
+            if (e.errno == OsConstants.ENOTEMPTY) throw new DirectoryNotEmptyException(to);
+            if (e.errno == OsConstants.EEXIST) throw new FileAlreadyExistsException(to);
             throw io(e, from + " -> " + to);
         }
     }
@@ -187,7 +245,7 @@ public final class LocalFs implements Fs {
         try (DirectoryStream<Path> parent = Files.newDirectoryStream(file.getParent())) {
             Stat current = lstat(path);
             if (current == null) return;
-            if (current.type != Type.FILE) throw new IOException("Expected a regular file: " + path);
+            if (current.type == Type.DIRECTORY) throw new IOException("Expected a non-directory entry: " + path);
             if (parent instanceof SecureDirectoryStream) {
                 try {
                     ((SecureDirectoryStream<Path>) parent).deleteFile(file.getFileName());
