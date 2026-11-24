@@ -13,9 +13,11 @@ import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
@@ -24,7 +26,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * 24 hours are dropped by {@link #get}. Only CUT exists for now; COPY is added after the verified copy (S4).
  * The same file keeps the records of running and cut-short pastes (see {@link #beginPaste}).
  *
- * <p>Nothing here touches files. {@link State} is a plain value object (no Android types).
+ * <p>Temporary names are persisted before creation. Startup cleanup is delegated to InterruptedPastes.
  */
 public final class Clipboard {
     private static final String AREA = "clip";
@@ -33,11 +35,11 @@ public final class Clipboard {
     private static final String KEY_CREATED = "createdAt";
     private static final String KEY_ITEMS = "items";
     /**
-     * JSON object of the pastes running now: key "<process>:<token>" -> {proc, dest, at, reserved[]}. A record of
+     * JSON object of the pastes running now: key "<process>:<token>" -> {proc, dest, at, reserved[], parts[]}. A record of
      * another process is a paste that was cut short (the process died) and is moved to KEY_INTERRUPTED.
      */
     private static final String KEY_PASTE = "paste";
-    /** JSON array of cut-short pastes: {dest, at, reserved[], toasted}. Kept until the user dismisses them. */
+    /** JSON array of cut-short pastes: {dest, at, reserved[], parts[], toasted}. Kept until the user dismisses them. */
     private static final String KEY_INTERRUPTED = "interrupted";
     private static final int MAX_INTERRUPTED = 20;
     static final long MAX_AGE_MS = 24L * 60 * 60 * 1000;
@@ -149,7 +151,7 @@ public final class Clipboard {
 
     // ---- paste marker (an interrupted paste is never resumed automatically) ----------------------------------
 
-    /** A paste that was cut short by the process dying (ColorOS). Nothing is resumed or deleted automatically. */
+    /** A paste that was cut short by the process dying (ColorOS). Only recorded temporary files can be cleaned on startup. */
     public static final class Interrupted {
         /** The folder the paste was going into. */
         public final String destination;
@@ -159,13 +161,20 @@ public final class Clipboard {
          * paste stopped. One of them can still be that placeholder: a stray empty file or folder.
          */
         public final List<String> reserved;
+        /** Exact paths of temporary files still eligible for startup cleanup. */
+        public final List<String> parts;
         /** The "interrupted" toast was already shown for it. */
         public final boolean toasted;
 
         Interrupted(String destination, long at, List<String> reserved, boolean toasted) {
+            this(destination, at, reserved, Collections.emptyList(), toasted);
+        }
+
+        Interrupted(String destination, long at, List<String> reserved, List<String> parts, boolean toasted) {
             this.destination = destination;
             this.at = at;
             this.reserved = Collections.unmodifiableList(reserved);
+            this.parts = Collections.unmodifiableList(parts);
             this.toasted = toasted;
         }
     }
@@ -205,34 +214,52 @@ public final class Clipboard {
         changeReserved(context, token, path, false);
     }
 
+    public static boolean recordPart(Context context, long token, String path) {
+        return changeName(context, token, "parts", path, true);
+    }
+
+    public static void forgetPart(Context context, long token, String path) {
+        changeName(context, token, "parts", path, false);
+    }
+
     private static void changeReserved(Context context, long token, String path, boolean add) {
+        changeName(context, token, "reserved", path, add);
+    }
+
+    private static boolean changeName(Context context, long token, String field, String path, boolean add) {
         synchronized (LOCK) {
             SharedPreferences prefs = prefs(context);
             try {
                 JSONObject all = readObject(prefs, KEY_PASTE);
                 JSONObject record = all.optJSONObject(PROCESS + ":" + token);
-                if (record == null) return;
-                JSONArray old = record.optJSONArray("reserved");
+                if (record == null) return false;
+                JSONArray old = record.optJSONArray(field);
                 JSONArray names = new JSONArray();
                 if (old != null) for (int i = 0; i < old.length(); i++) {
                     if (!path.equals(old.getString(i))) names.put(old.getString(i));
                 }
                 if (add) names.put(path);
-                record.put("reserved", names);
-                prefs.edit().putString(KEY_PASTE, all.toString()).commit();
+                record.put(field, names);
+                boolean saved = prefs.edit().putString(KEY_PASTE, all.toString()).commit();
+                if (!saved) DiagLog.e(AREA, "Cannot save " + field + " for " + path, null);
+                return saved;
             } catch (Throwable t) {
-                DiagLog.e(AREA, "Cannot record a reserved name", t);
+                DiagLog.e(AREA, "Cannot update " + field + " for " + path, t);
+                return false;
             }
         }
     }
 
-    /** The paste has finished normally: its record goes away. */
+    /** The paste has finished. A record with an empty proc is kept only for part cleanup. */
     public static void endPaste(Context context, long token) {
         synchronized (LOCK) {
             SharedPreferences prefs = prefs(context);
             try {
                 JSONObject all = readObject(prefs, KEY_PASTE);
-                all.remove(PROCESS + ":" + token);
+                String key = PROCESS + ":" + token;
+                JSONObject record = all.optJSONObject(key);
+                if (record != null && !names(record, "parts").isEmpty()) record.put("proc", "");
+                else all.remove(key);
                 SharedPreferences.Editor editor = prefs.edit();
                 if (all.length() == 0) editor.remove(KEY_PASTE);
                 else editor.putString(KEY_PASTE, all.toString());
@@ -246,23 +273,26 @@ public final class Clipboard {
     /** Pastes that were cut short, oldest first. They stay until {@link #dismissInterrupted}. */
     public static List<Interrupted> interrupted(Context context) {
         synchronized (LOCK) {
-            SharedPreferences prefs = prefs(context);
-            List<Interrupted> out = new ArrayList<>();
             try {
+                SharedPreferences prefs = prefs(context);
                 promoteStale(prefs);
-                JSONArray list = readArray(prefs, KEY_INTERRUPTED);
-                for (int i = 0; i < list.length(); i++) {
-                    JSONObject o = list.getJSONObject(i);
-                    List<String> names = new ArrayList<>();
-                    JSONArray reserved = o.optJSONArray("reserved");
-                    if (reserved != null) for (int k = 0; k < reserved.length(); k++) names.add(reserved.getString(k));
-                    out.add(new Interrupted(o.optString("dest", ""), o.optLong("at", 0), names, o.optBoolean("toasted", false)));
-                }
+                return readInterrupted(prefs);
             } catch (Throwable t) {
                 DiagLog.e(AREA, "Cannot read the interrupted pastes", t);
+                return Collections.emptyList();
             }
-            return out;
         }
+    }
+
+    private static List<Interrupted> readInterrupted(SharedPreferences prefs) throws Exception {
+        List<Interrupted> out = new ArrayList<>();
+        JSONArray list = readArray(prefs, KEY_INTERRUPTED);
+        for (int i = 0; i < list.length(); i++) {
+            JSONObject o = list.getJSONObject(i);
+            out.add(new Interrupted(o.optString("dest", ""), o.optLong("at", 0),
+                    names(o, "reserved"), names(o, "parts"), o.optBoolean("toasted", false)));
+        }
+        return out;
     }
 
     /** The toast for the interrupted pastes was shown; the records stay for the diagnostics page. */
@@ -279,11 +309,77 @@ public final class Clipboard {
         }
     }
 
-    /** The user has seen the records (diagnostics page): forget them. */
+    /** Forget reviewed records once they no longer have temporary files to clean. */
     public static void dismissInterrupted(Context context) {
         synchronized (LOCK) {
-            prefs(context).edit().remove(KEY_INTERRUPTED).commit();
+            try {
+                SharedPreferences prefs = prefs(context);
+                JSONArray list = readArray(prefs, KEY_INTERRUPTED);
+                for (int i = list.length() - 1; i >= 0; i--) {
+                    JSONObject record = list.optJSONObject(i);
+                    if (record != null && names(record, "parts").isEmpty()) list.remove(i);
+                }
+                if (!prefs.edit().putString(KEY_INTERRUPTED, list.toString()).commit()) {
+                    DiagLog.e(AREA, "Cannot dismiss interrupted pastes", null);
+                }
+            } catch (Throwable t) {
+                DiagLog.e(AREA, "Cannot dismiss interrupted pastes", t);
+            }
         }
+    }
+
+    /** Runs as the first file-executor task after application initialization. */
+    public static void recoverInterrupted(Context context) {
+        try {
+            SharedPreferences prefs;
+            List<Interrupted> snapshot;
+            synchronized (LOCK) {
+                prefs = prefs(context);
+                promoteStale(prefs);
+                snapshot = readInterrupted(prefs);
+            }
+
+            Map<String, Set<String>> resolved = new LinkedHashMap<>();
+            for (Interrupted record : snapshot) {
+                if (record.parts.isEmpty()) continue;
+                List<String> remaining = InterruptedPastes.cleanParts(context, record.destination, record.parts);
+                Set<String> removed = new HashSet<>(record.parts);
+                removed.removeAll(remaining);
+                if (!removed.isEmpty()) resolved.computeIfAbsent(record.destination, key -> new HashSet<>())
+                        .addAll(removed);
+            }
+            if (resolved.isEmpty()) return;
+
+            synchronized (LOCK) {
+                // Merge into the current records so concurrent diagnostics edits are preserved.
+                JSONArray list = readArray(prefs, KEY_INTERRUPTED);
+                boolean changed = false;
+                for (int i = 0; i < list.length(); i++) {
+                    JSONObject record = list.getJSONObject(i);
+                    Set<String> removed = resolved.get(record.optString("dest"));
+                    if (removed == null) continue;
+                    List<String> parts = names(record, "parts");
+                    if (!parts.removeAll(removed)) continue;
+                    record.put("parts", new JSONArray(parts));
+                    changed = true;
+                }
+                if (changed && !prefs.edit().putString(KEY_INTERRUPTED, list.toString()).commit()) {
+                    DiagLog.e(AREA, "Cannot save interrupted move cleanup", null);
+                }
+            }
+        } catch (Throwable t) {
+            DiagLog.e(AREA, "Cannot recover interrupted moves", t);
+        }
+    }
+
+    private static List<String> names(JSONObject record, String field) {
+        List<String> paths = new ArrayList<>();
+        JSONArray names = record.optJSONArray(field);
+        if (names != null) for (int i = 0; i < names.length(); i++) {
+            String path = names.optString(i, "");
+            if (!path.isEmpty()) paths.add(path);
+        }
+        return paths;
     }
 
     /** Moves records of earlier processes from the running list to the interrupted list. */
@@ -297,22 +393,27 @@ public final class Clipboard {
         while (keys.hasNext()) {
             String key = keys.next();
             JSONObject record = all.getJSONObject(key);
-            if (PROCESS.equals(record.optString("proc"))) {
+            String process = record.optString("proc");
+            if (PROCESS.equals(process)) {
                 keep.put(key, record);
             } else {
                 list.put(new JSONObject().put("dest", record.optString("dest", "")).put("at", record.optLong("at", 0))
                         .put("reserved", record.optJSONArray("reserved") == null ? new JSONArray()
-                                : record.optJSONArray("reserved")).put("toasted", false));
+                                : record.optJSONArray("reserved"))
+                        .put("parts", new JSONArray(names(record, "parts"))).put("toasted", process.isEmpty()));
                 moved = true;
             }
         }
         if (!moved) return;
-        while (list.length() > MAX_INTERRUPTED) list.remove(0);
+        for (int i = 0; list.length() > MAX_INTERRUPTED && i < list.length();) {
+            if (names(list.getJSONObject(i), "parts").isEmpty()) list.remove(i);
+            else i++;
+        }
         SharedPreferences.Editor editor = prefs.edit().putString(KEY_INTERRUPTED, list.toString());
         if (keep.length() == 0) editor.remove(KEY_PASTE);
         else editor.putString(KEY_PASTE, keep.toString());
         editor.commit();
-        DiagLog.i(AREA, "A paste that was cut short by the process dying was recorded (see Diagnostics)");
+        DiagLog.i(AREA, "Interrupted paste or pending part cleanup recorded (see Diagnostics)");
     }
 
     private static JSONObject readObject(SharedPreferences prefs, String key) {

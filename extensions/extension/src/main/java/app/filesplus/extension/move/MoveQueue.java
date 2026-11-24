@@ -13,6 +13,7 @@ import app.filesplus.extension.clip.Clipboard;
 import app.filesplus.extension.clip.PasteRules;
 import app.filesplus.extension.clip.PasteTarget;
 import app.filesplus.extension.foldertabs.TabMove;
+import app.filesplus.extension.ops.VerifiedCopy;
 
 import java.io.File;
 import java.io.IOException;
@@ -35,7 +36,7 @@ import java.util.Set;
  * that page or the preview closes. Holds only the application context, never an Activity or View.
  *
  * <p>{@link #paste} runs the clipboard (cut) through the same engine: {@link TabMove#move} on the single file
- * thread (name reservation and {@code Os.rename}, DESIGN 10.4; no copy, no delete).
+ * thread, including verified cross-volume file moves.
  */
 public final class MoveQueue {
     private static final String AREA = "move";
@@ -73,10 +74,11 @@ public final class MoveQueue {
         /** Items that are part of another unfinished paste (skipped, not touched). */
         public int busy;
         public int failed;
-        /** Subset of {@link #failed}: items on another volume. */
+        /** Subset of {@link #failed}: folders on another volume. */
         public int crossVolume;
         /** Items held until the preview page they play on is left. */
         public int held;
+        private TabMove.Result moveDetails;
     }
 
     /** One paste: its clipboard snapshot, callback and counters. */
@@ -85,6 +87,7 @@ public final class MoveQueue {
         final PasteCallback callback;
         final PasteResult result = new PasteResult();
         final List<ClipItem> present = new ArrayList<>();
+        final VerifiedCopy.Job copyJob = new VerifiedCopy.Job();
         /** The record of this paste in {@link Clipboard#beginPaste}. */
         long token;
 
@@ -101,10 +104,7 @@ public final class MoveQueue {
         final Done done;
         final PasteJob paste;
         int pending;
-        int moved;
-        int skipped;
-        int failed;
-        int crossVolume;
+        final TabMove.Result moves = new TabMove.Result();
         boolean destinationLogged;
 
         Batch(Context app, File destination, Done done, int pending) {
@@ -249,12 +249,14 @@ public final class MoveQueue {
             TabMove.fileExecutor().execute(() -> run(job));
         } catch (Throwable t) {
             DiagLog.e(AREA, "submit failed", t);
-            finish(job, 0, 0, 1, 0);
+            TabMove.Result result = new TabMove.Result();
+            result.failed = 1;
+            finish(job, result);
         }
     }
 
     private static void run(Job job) {
-        int moved = 0, skipped = 0, failed = 0, crossVolume = 0;
+        TabMove.Result result = new TabMove.Result();
         try {
             File destination = job.batch.destination;
             if (!destination.isDirectory() || !destination.canWrite()) {
@@ -264,18 +266,16 @@ public final class MoveQueue {
                     job.batch.destinationLogged = true;
                 }
                 if (first) DiagLog.e(AREA, "Destination unusable: " + destination, null);
-                failed = 1;
+                result.failed = 1;
             } else {
                 List<String> paths = job.paths != null ? job.paths : TabMove.pathsOf(job.batch.app, new long[]{job.id});
                 if (paths.isEmpty()) {
                     DiagLog.e(AREA, "No path for id " + job.id, null);
-                    failed = 1;
+                    result.failed = 1;
                 } else {
+                    Batch batch = job.batch;
                     TabMove.ReservationListener listener = null;
-                    if (job.batch.paste != null) {
-                        // Every reserved name is written down before its rename: a process that dies in between
-                        // leaves a 0-byte placeholder, and the next paste can say where to look.
-                        Batch batch = job.batch;
+                    if (batch.paste != null) {
                         long token = batch.paste.token;
                         listener = new TabMove.ReservationListener() {
                             @Override public void reserved(File target) {
@@ -285,53 +285,56 @@ public final class MoveQueue {
                             @Override public void done(File target) {
                                 Clipboard.unreserve(batch.app, token, target.getPath());
                             }
+
+                            @Override public void partStarted(File part) throws IOException {
+                                if (!Clipboard.recordPart(batch.app, token, part.getPath())) {
+                                    throw new IOException("Cannot record temporary path: " + part);
+                                }
+                            }
+
+                            @Override public void partFinished(File part) {
+                                Clipboard.forgetPart(batch.app, token, part.getPath());
+                            }
                         };
                     }
-                    TabMove.Result result = TabMove.move(job.batch.app, paths, destination, listener);
-                    moved = result.moved;
-                    skipped = result.skipped;
-                    failed = result.failed;
-                    crossVolume = result.crossVolume;
+                    result = batch.paste == null ? TabMove.move(batch.app, paths, destination)
+                            : TabMove.move(batch.app, paths, destination, listener, batch.paste.copyJob);
                 }
             }
         } catch (Throwable t) {
             DiagLog.e(AREA, "Job failed for id " + job.id, t);
-            failed = 1;
+            result.failed = 1;
         }
-        finish(job, moved, skipped, failed, crossVolume);
+        finish(job, result);
     }
 
-    private static void finish(Job job, int moved, int skipped, int failed, int crossVolume) {
+    private static void finish(Job job, TabMove.Result result) {
         try {
             Batch batch = job.batch;
             if (job.paths != null) release(job.paths);
-            boolean done;
-            int totalMoved, totalSkipped, totalFailed, totalCross;
+            TabMove.Result total = batch.moves;
             synchronized (batch) {
-                batch.moved += moved;
-                batch.skipped += skipped;
-                batch.failed += failed;
-                batch.crossVolume += crossVolume;
-                batch.pending--;
-                done = batch.pending == 0;
-                totalMoved = batch.moved;
-                totalSkipped = batch.skipped;
-                totalFailed = batch.failed;
-                totalCross = batch.crossVolume;
+                total.moved += result.moved;
+                total.skipped += result.skipped;
+                total.failed += result.failed;
+                total.crossVolume += result.crossVolume;
+                total.reasons.addAll(result.reasons);
+                total.hashStopped |= result.hashStopped;
+                total.sourceKept |= result.sourceKept;
+                if (--batch.pending != 0) return;
             }
-            if (!done) return;
             if (batch.paste != null) {
-                finishPaste(batch, totalMoved, totalSkipped, totalFailed, totalCross);
+                finishPaste(batch);
                 return;
             }
-            if (totalMoved > 0) DestinationHistory.recordLast(batch.destination);
-            String text = message(batch.destination, totalMoved, totalSkipped, totalFailed);
-            if (totalCross > 0) text += "\n" + TabMove.crossVolumeNote(batch.app);
-            toast(batch.app, text);
+            if (total.moved > 0) DestinationHistory.recordLast(batch.destination);
+            String summary = message(batch.destination, total.moved, total.skipped, total.failed);
+            boolean ja = "ja".equals(batch.app.getResources().getConfiguration().getLocales().get(0).getLanguage());
+            toast(batch.app, withMoveNotes(summary, ja, total));
             if (batch.done != null) {
                 // MediaStore was synced inside TabMove.move, so a reload from here no longer lists the moved files.
-                int notMoved = totalSkipped + totalFailed;
-                int movedCount = totalMoved;
+                int notMoved = total.skipped + total.failed;
+                int movedCount = total.moved;
                 new Handler(Looper.getMainLooper()).post(() -> {
                     try {
                         batch.done.onDone(movedCount, notMoved);
@@ -441,7 +444,7 @@ public final class MoveQueue {
                     release(Collections.singletonList(item.path()));
                 }
             }
-            paste.token = Clipboard.beginPaste(context, dest.getPath());
+            paste.token = Clipboard.beginPaste(context, dest.getCanonicalPath());
             started = true;
 
             // Decide in one step which items wait for the preview and set the counter before anything can finish.
@@ -468,7 +471,7 @@ public final class MoveQueue {
             DiagLog.i(AREA, "Paste " + paste.present.size() + " item(s) to " + dest + ", held " + held.size()
                     + ", missing " + paste.result.missing + ", busy " + paste.result.busy);
             if (batch.pending == 0) {
-                finishPaste(batch, 0, 0, 0, 0);
+                finishPaste(batch);
                 return;
             }
             if (!held.isEmpty()) toast(context, heldText(context, held.size()));
@@ -524,18 +527,20 @@ public final class MoveQueue {
     }
 
     /** Last unit of a paste is done: update the clipboard and the last folder, tell the user and the caller. */
-    private static void finishPaste(Batch batch, int moved, int sameFolder, int failed, int crossVolume) {
+    private static void finishPaste(Batch batch) {
         PasteJob paste = batch.paste;
+        TabMove.Result moves = batch.moves;
         try {
             PasteResult result = paste.result;
-            result.moved = moved;
-            result.sameFolder = sameFolder;
-            result.failed = failed;
-            result.crossVolume = crossVolume;
-            if (moved > 0) DestinationHistory.recordLast(batch.destination);
+            result.moved = moves.moved;
+            result.sameFolder = moves.skipped;
+            result.failed = moves.failed;
+            result.crossVolume = moves.crossVolume;
+            result.moveDetails = moves;
+            if (moves.moved > 0) DestinationHistory.recordLast(batch.destination);
             // Success empties the clipboard. After failures the items that are still where they were stay in it.
             List<ClipItem> remaining = new ArrayList<>();
-            if (failed > 0) {
+            if (moves.failed > 0) {
                 for (ClipItem item : paste.present) {
                     if (stillThere(item, batch.destination)) remaining.add(item);
                 }
@@ -617,8 +622,30 @@ public final class MoveQueue {
             if (r.busy > 0) sb.append(" (").append(r.busy).append(" busy, skipped)");
             if (r.failed > 0 && r.moved > 0) sb.append(" (").append(r.failed).append(" failed)");
         }
-        if (r.crossVolume > 0) sb.append('\n').append(TabMove.crossVolumeNote(ja));
-        return sb.toString();
+        return withMoveNotes(sb.toString(), ja, r.moveDetails);
+    }
+
+    static String withMoveNotes(String summary, boolean ja, TabMove.Result result) {
+        if (result == null) return summary;
+        // Text toasts can truncate the summary, so put the reason before the destination path.
+        StringBuilder text = new StringBuilder();
+        if (result.crossVolume > 0) text.append(TabMove.crossVolumeNote(ja)).append('\n');
+        if (result.reasons.contains(VerifiedCopy.Reason.NAME_INVALID)) {
+            text.append(ja
+                    ? "SD カードで使えない文字（\" * : < > ? \\ |）や末尾の点・空白を含む名前は移動できません"
+                    : "Names with characters the SD card cannot store (\" * : < > ? \\ |) or a trailing dot/space cannot be moved").append('\n');
+        }
+        if (result.reasons.contains(VerifiedCopy.Reason.NO_SPACE)) {
+            text.append(ja ? "移動先の空き容量が足りません" : "Not enough free space at the destination").append('\n');
+        }
+        if (result.hashStopped) {
+            text.append(ja ? "書き込みの検証に失敗したため残りを止めました（SD カードを確かめてください）"
+                    : "Stopped: written data failed verification (check the SD card)").append('\n');
+        }
+        if (result.sourceKept) {
+            text.append(ja ? "元のファイルは残しました" : "The original file was kept").append('\n');
+        }
+        return text.length() == 0 ? summary : text.append(summary).toString();
     }
 
     private static String message(File destination, int moved, int skipped, int failed) {
