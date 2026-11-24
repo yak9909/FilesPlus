@@ -60,6 +60,14 @@ public final class MoveNotesSelfTest {
         retained.sourceKept = true;
         expect("source kept after success", "The original was kept\n", false, retained);
         expect("source kept after success in Japanese", "元のファイル・フォルダは残しました\n", true, retained);
+        String path = "/storage/emulated/0/Download";
+        if (!("Copied 1 item(s) to " + path).equals(MoveQueue.copySummary(1, path, false)))
+            throw new AssertionError("English copy summary");
+        checks++;
+        if (!("2 件を " + path + " にコピーしました").equals(MoveQueue.copySummary(2, path, true)))
+            throw new AssertionError("Japanese copy summary");
+        checks++;
+
         System.out.println("Move result notes: ALL PASS (" + checks + " checks)");
     }
 }

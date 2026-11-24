@@ -54,6 +54,7 @@ public final class TabMove {
 
     public static final class Result {
         public int moved;
+        public int copied;
         public int skipped;
         public int failed;
         public final EnumSet<VerifiedCopy.Reason> reasons = EnumSet.noneOf(VerifiedCopy.Reason.class);
@@ -156,6 +157,17 @@ public final class TabMove {
 
     public static Result move(Context context, List<String> sources, File destination,
                               ReservationListener listener, VerifiedCopy.Job job, VerifiedFolderMove.PasteBudget budget) {
+        return transferItems(context, sources, destination, listener, job, budget, false);
+    }
+
+    public static Result copy(Context context, List<String> sources, File destination,
+                              ReservationListener listener, VerifiedCopy.Job job, VerifiedFolderMove.PasteBudget budget) {
+        return transferItems(context, sources, destination, listener, job, budget, true);
+    }
+
+    private static Result transferItems(Context context, List<String> sources, File destination,
+                                        ReservationListener listener, VerifiedCopy.Job job,
+                                        VerifiedFolderMove.PasteBudget budget, boolean copyOnly) {
         // Preview moves only need a running record if they start a cross-volume copy.
         PasteRecord standalone = listener == null ? new PasteRecord(context) : null;
         ReservationListener recorder = standalone == null ? listener : standalone;
@@ -177,7 +189,7 @@ public final class TabMove {
                 }
                 File parent = source.getParentFile();
                 // Case-insensitive on purpose: FAT / FUSE treat names that differ in case as the same.
-                if (parent != null && parent.getCanonicalPath().toLowerCase(Locale.ROOT)
+                if (!copyOnly && parent != null && parent.getCanonicalPath().toLowerCase(Locale.ROOT)
                         .equals(destination.getCanonicalPath().toLowerCase(Locale.ROOT))) {
                     result.skipped++;
                     continue;
@@ -194,27 +206,31 @@ public final class TabMove {
                     if (dst.startsWith(src)) throw new IOException("Cannot move a folder into itself or below itself");
                 }
                 File target;
-                Fs.Stat destStat = LOCAL.lstat(destination.getPath());
-                if (destStat != null && sourceStat.device != destStat.device) {
+                Fs.Stat destStat = copyOnly ? null : LOCAL.lstat(destination.getPath());
+                if (copyOnly || (destStat != null && sourceStat.device != destStat.device)) {
                     // Some SD names fail at reservation time, before rename could report EXDEV.
-                    target = copyAcrossVolumes(context, source, sourceStat, destination, recorder, job, result,
-                            childPaths, budget);
+                    target = copyVerified(context, source, sourceStat, destination, recorder, job, result,
+                            childPaths, budget, copyOnly);
                 } else {
                     if (directory) childPaths.addAll(FolderTrash.mediaPaths(context, source));
                     try {
                         target = transfer(source, destination, directory, recorder);
                     } catch (ErrnoException e) {
                         childPaths.clear();
-                        target = copyAcrossVolumes(context, source, sourceStat, destination, recorder, job, result,
-                                childPaths, budget);
+                        target = copyVerified(context, source, sourceStat, destination, recorder, job, result,
+                                childPaths, budget, false);
                     }
                 }
-                result.moved++;
-                oldPaths.add(source.getPath());
+                if (copyOnly) {
+                    result.copied++;
+                } else {
+                    result.moved++;
+                    oldPaths.add(source.getPath());
+                }
                 newPaths.add(target.getPath());
                 String oldPrefix = source.getPath() + File.separator;
                 for (String child : childPaths) {
-                    oldPaths.add(child);
+                    if (!copyOnly) oldPaths.add(child);
                     newPaths.add(target.getPath() + File.separator + child.substring(oldPrefix.length()));
                 }
                 if (!target.getName().equals(source.getName()))
@@ -222,23 +238,24 @@ public final class TabMove {
             } catch (CopyFailure e) {
                 result.failed++;
                 result.reasons.add(e.reason);
-                DiagLog.e(AREA, "Failed to move " + path + " (" + e.reason + ")", e);
+                DiagLog.e(AREA, (copyOnly ? "Failed to copy " : "Failed to move ") + path + " (" + e.reason + ")", e);
             } catch (Throwable t) {
                 result.failed++;
-                DiagLog.e(AREA, "Failed to move " + path, t);
+                DiagLog.e(AREA, (copyOnly ? "Failed to copy " : "Failed to move ") + path, t);
             }
         }
         result.hashStopped = job.stopped();
         if (standalone != null) standalone.end();
         syncMediaStore(context, oldPaths, newPaths);
-        DiagLog.i(AREA, "Move to " + destination + ": moved=" + result.moved + ", skipped=" + result.skipped
-                + ", failed=" + result.failed);
+        String completed = copyOnly ? "copied=" + result.copied : "moved=" + result.moved;
+        DiagLog.i(AREA, (copyOnly ? "Copy to " : "Move to ") + destination + ": " + completed
+                + ", skipped=" + result.skipped + ", failed=" + result.failed);
         return result;
     }
 
-    private static File copyAcrossVolumes(Context context, File source, Fs.Stat sourceStat, File destination,
+    private static File copyVerified(Context context, File source, Fs.Stat sourceStat, File destination,
                                           ReservationListener listener, VerifiedCopy.Job job, Result result,
-                                          List<String> childPaths, VerifiedFolderMove.PasteBudget budget)
+                                     List<String> childPaths, VerifiedFolderMove.PasteBudget budget, boolean copyOnly)
             throws IOException {
         long started = System.nanoTime();
         long bytes = 0;
@@ -262,7 +279,10 @@ public final class TabMove {
             boolean removable = volume != null && volume.isRemovable();
             VerifiedCopy.Observer observer = copyObserver(listener, directory);
             if (directory) {
-                VerifiedFolderMove.Result copy = VerifiedFolderMove.move(LOCAL, source.getPath(), LOCAL,
+                VerifiedFolderMove.Result copy = copyOnly
+                        ? VerifiedFolderMove.copy(LOCAL, source.getPath(), LOCAL, folder.getPath(), source.getName(),
+                                removable, job, () -> false, observer, budget)
+                        : VerifiedFolderMove.move(LOCAL, source.getPath(), LOCAL,
                         folder.getPath(), source.getName(), removable, job, () -> false,
                         observer, (opId, fileCount, totalBytes, check) -> {
                             File root = sourceVolume(context, source, sourceStat);
@@ -277,7 +297,7 @@ public final class TabMove {
                     throw new CopyFailure(copy.reason);
                 }
                 for (String relative : copy.children) childPaths.add(new File(source, relative).getPath());
-                outcome = "MOVED";
+                outcome = copyOnly ? "COPIED" : "MOVED";
                 if (copy.sourceKept) {
                     keepSource(result, source);
                     outcome = "MOVED (source kept)";
@@ -285,12 +305,18 @@ public final class TabMove {
                 return new File(copy.target);
             }
 
+            long maxBytes = copyOnly && budget != null ? budget.availableFileBytes(source.getPath()) : Long.MAX_VALUE;
             VerifiedCopy.Result copy = VerifiedCopy.copy(LOCAL, source.getPath(), LOCAL, folder.getPath(),
-                    source.getName(), removable, job, () -> false, observer);
+                    source.getName(), removable, job, () -> false, observer, maxBytes);
             bytes = copy.bytes;
             if (!copy.succeeded()) {
                 outcome = "FAILED/" + copy.reason;
                 throw new CopyFailure(copy.reason);
+            }
+            if (copyOnly) {
+                if (budget != null) budget.recordCopiedFile(source.getPath(), copy.bytes);
+                outcome = "COPIED";
+                return new File(copy.target);
             }
             outcome = "MOVED";
             try {
@@ -304,10 +330,11 @@ public final class TabMove {
             return new File(copy.target);
         } finally {
             long elapsed = System.nanoTime() - started;
-            double rate = elapsed > 0 && outcome.startsWith("MOVED") ? bytes * 1000.0 / elapsed : 0;
-            lastCrossVolumeCopy = String.format(Locale.ROOT, "%d bytes, %d ms, %.2f MB/s, %s",
+            double rate = elapsed > 0 && !outcome.startsWith("FAILED") ? bytes * 1000.0 / elapsed : 0;
+            String summary = String.format(Locale.ROOT, "%d bytes, %d ms, %.2f MB/s, %s",
                     bytes, elapsed / 1_000_000, rate, outcome);
-            DiagLog.i(AREA, "Cross-volume copy: " + lastCrossVolumeCopy);
+            if (!copyOnly) lastCrossVolumeCopy = summary;
+            DiagLog.i(AREA, (copyOnly ? "Clipboard copy: " : "Cross-volume copy: ") + summary);
         }
     }
 
@@ -500,7 +527,7 @@ public final class TabMove {
      * dropped by scanning the old paths (a missing path removes its row) and the new paths are registered.
      */
     private static void syncMediaStore(Context context, List<String> oldPaths, List<String> newPaths) {
-        if (oldPaths.isEmpty()) return;
+        if (oldPaths.isEmpty() && newPaths.isEmpty()) return;
         List<String> all = new ArrayList<>(oldPaths);
         all.addAll(newPaths);
         try {
@@ -509,7 +536,7 @@ public final class TabMove {
                 MediaScannerConnection.scanFile(context, part.toArray(new String[0]), null, null);
             }
         } catch (Throwable t) {
-            DiagLog.e(AREA, "Failed to scan moved files", t);
+            DiagLog.e(AREA, "Failed to scan transferred files", t);
         }
     }
 }

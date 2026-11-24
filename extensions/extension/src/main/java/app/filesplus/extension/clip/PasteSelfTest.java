@@ -1,6 +1,7 @@
 package app.filesplus.extension.clip;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.media.MediaScannerConnection;
 import android.os.Environment;
 
@@ -9,6 +10,7 @@ import org.json.JSONObject;
 import app.filesplus.extension.browse.Category;
 import app.filesplus.extension.browse.LocalFolders;
 import app.filesplus.extension.browse.Location;
+import app.filesplus.extension.clip.Clipboard.Mode;
 import app.filesplus.extension.move.MoveQueue;
 import app.filesplus.extension.move.DestinationHistory;
 import app.filesplus.extension.foldertabs.TabMove;
@@ -104,6 +106,19 @@ public final class PasteSelfTest {
                 PasteRules.check(state(item(fileA), item(fileB)), folder(src, roots)), PasteRules.Reason.SAME_FOLDER);
         r.rule("OK: only some items are already there (those are skipped)",
                 PasteRules.check(state(item(fileA), item(inDst)), folder(dst, roots)), null);
+        r.rule("COPY: a file into its current folder",
+                PasteRules.check(state(Mode.COPY, item(fileA)), folder(src, roots)), null);
+        r.rule("COPY: a folder into its parent",
+                PasteRules.check(state(Mode.COPY, item(child)), folder(src, roots)), null);
+        r.rule("COPY: a folder into itself",
+                PasteRules.check(state(Mode.COPY, item(src)), folder(src, roots)), PasteRules.Reason.INTO_SELF);
+        r.rule("COPY: a folder into its descendant",
+                PasteRules.check(state(Mode.COPY, item(src)), folder(child, roots)), PasteRules.Reason.INTO_SELF);
+        r.check("clipboard: Add requires a non-empty clipboard with the offered mode",
+                !state().canAdd(Mode.CUT) && !state().canAdd(Mode.COPY)
+                        && state(item(fileA)).canAdd(Mode.CUT) && !state(item(fileA)).canAdd(Mode.COPY)
+                        && state(Mode.COPY, item(fileA)).canAdd(Mode.COPY)
+                        && !state(Mode.COPY, item(fileA)).canAdd(Mode.CUT), null);
         // INTO_SELF
         r.rule("INTO_SELF: a folder into its own child",
                 PasteRules.check(state(item(src)), folder(child, roots)), PasteRules.Reason.INTO_SELF);
@@ -226,7 +241,11 @@ public final class PasteSelfTest {
     }
 
     private static Clipboard.State state(ClipItem... items) {
-        return new Clipboard.State(Clipboard.Mode.CUT, Arrays.asList(items), System.currentTimeMillis());
+        return state(Mode.CUT, items);
+    }
+
+    private static Clipboard.State state(Mode mode, ClipItem... items) {
+        return new Clipboard.State(mode, Arrays.asList(items), System.currentTimeMillis());
     }
 
     private static ClipItem[] many(File folder, int count, long size) {
@@ -280,6 +299,7 @@ public final class PasteSelfTest {
             interruptedPastes(r, context, base);
             reservationListener(r, context, base);
             realPaste(r, context, base);
+            realCopyPaste(r, context, base);
         } catch (Throwable t) {
             r.check("unexpected exception", false, t.toString());
         } finally {
@@ -346,23 +366,44 @@ public final class PasteSelfTest {
     private static void clipboardStore(Report r, Context context, File base) throws IOException {
         File f1 = write(new File(base, "clip1.txt"), "1");
         File f2 = write(new File(base, "clip2.txt"), "2");
-        Clipboard.cut(context, Arrays.asList(item(f1), item(f2)));
+        Clipboard.replace(context, Mode.CUT, Arrays.asList(item(f1), item(f2)));
         Clipboard.State got = Clipboard.get(context);
         r.check("clipboard: cut stores 2 items in order", got.items.size() == 2
                 && got.items.get(0).path().equals(f1.getPath()) && got.items.get(1).name().equals("clip2.txt")
-                && got.mode == Clipboard.Mode.CUT && got.createdAt > 0, got.items.size() + " item(s)");
-        Clipboard.add(context, Arrays.asList(item(f2), new ClipItem(new File(base, "clip3").getPath(), 7, "clip3", 5, true)));
+                && got.mode == Mode.CUT && got.createdAt > 0, got.items.size() + " item(s)");
+        Clipboard.add(context, Mode.CUT, Arrays.asList(item(f2), new ClipItem(new File(base, "clip3").getPath(), 7, "clip3", 5, true)));
         got = Clipboard.get(context);
         r.check("clipboard: add keeps one copy of equal paths", got.items.size() == 3
                 && got.items.get(2).isDir() && got.items.get(2).mediaId() == 7, got.items.size() + " item(s)");
-        Clipboard.cut(context, Collections.singletonList(item(f1)));
+        Clipboard.replace(context, Mode.CUT, Collections.singletonList(item(f1)));
         r.check("clipboard: cut replaces the contents", Clipboard.get(context).items.size() == 1, null);
-        Clipboard.State old = new Clipboard.State(Clipboard.Mode.CUT, Collections.singletonList(item(f1)),
+        SharedPreferences prefs = context.getSharedPreferences("filesplus_clipboard_selftest", Context.MODE_PRIVATE);
+        r.check("clipboard: CUT persisted as CUT", "CUT".equals(prefs.getString("mode", null)), null);
+        prefs.edit().remove("mode").commit();
+        got = Clipboard.get(context);
+        r.check("clipboard: legacy entries without a mode read as CUT",
+                got.mode == Mode.CUT && got.items.size() == 1 && got.items.get(0).path().equals(f1.getPath()), null);
+
+        Clipboard.replace(context, Mode.COPY, Collections.singletonList(item(f2)));
+        got = Clipboard.get(context);
+        r.check("clipboard: COPY replaces CUT and round trips",
+                "COPY".equals(prefs.getString("mode", null)) && got.mode == Mode.COPY
+                        && got.items.size() == 1 && got.items.get(0).path().equals(f2.getPath()), null);
+        r.check("clipboard: a stale CUT Add action cannot modify COPY",
+                !Clipboard.add(context, Mode.CUT, Collections.singletonList(item(f1)))
+                        && Clipboard.get(context).createdAt == got.createdAt, null);
+        r.check("clipboard: Add keeps the COPY mode",
+                Clipboard.add(context, Mode.COPY, Collections.singletonList(item(f1)))
+                        && Clipboard.get(context).items.size() == 2 && Clipboard.get(context).mode == Mode.COPY, null);
+        Clipboard.replace(context, Mode.CUT, Collections.singletonList(item(f1)));
+        r.check("clipboard: CUT replaces COPY",
+                Clipboard.get(context).items.size() == 1 && Clipboard.get(context).mode == Mode.CUT, null);
+        Clipboard.State old = new Clipboard.State(Mode.CUT, Collections.singletonList(item(f1)),
                 System.currentTimeMillis() - 25L * 60 * 60 * 1000);
         Clipboard.restore(context, old);
         r.check("clipboard: contents older than 24 hours are dropped", Clipboard.get(context).isEmpty(), null);
         r.check("clipboard: ... and stay dropped", Clipboard.get(context).isEmpty(), null);
-        Clipboard.cut(context, Collections.singletonList(item(f1)));
+        Clipboard.replace(context, Mode.CUT, Collections.singletonList(item(f1)));
         Clipboard.clear(context);
         r.check("clipboard: clear", Clipboard.get(context).isEmpty(), null);
     }
@@ -377,7 +418,7 @@ public final class PasteSelfTest {
         write(new File(sub, "inner.txt"), "inner");
         write(new File(dst, "a.txt"), "old A");
         File ghost = new File(src, "ghost.txt"); // never created: a vanished item
-        Clipboard.State state = new Clipboard.State(Clipboard.Mode.CUT,
+        Clipboard.State state = new Clipboard.State(Mode.CUT,
                 Arrays.asList(item(a), item(b), item(sub), item(ghost, 3, false)), System.currentTimeMillis());
 
         MoveQueue.PasteResult first = pasteAndWait(context, state, dst, false);
@@ -402,7 +443,7 @@ public final class PasteSelfTest {
         // A refused paste changes nothing.
         File keep = write(new File(src, "keep.txt"), "keep");
         File protectedDir = new File(LocalFolders.roots(context).get(0), "Android/data/" + context.getPackageName());
-        MoveQueue.PasteResult refused = pasteAndWait(context, new Clipboard.State(Clipboard.Mode.CUT,
+        MoveQueue.PasteResult refused = pasteAndWait(context, new Clipboard.State(Mode.CUT,
                 Collections.singletonList(item(keep)), System.currentTimeMillis()), protectedDir, false);
         r.check("paste: into Android/ is refused as PROTECTED and nothing moved",
                 refused != null && refused.refused == PasteRules.Reason.PROTECTED && keep.exists(),
@@ -410,11 +451,36 @@ public final class PasteSelfTest {
 
         // A missing destination folder is created when asked for.
         File created = new File(base, "paste/created");
-        MoveQueue.PasteResult make = pasteAndWait(context, new Clipboard.State(Clipboard.Mode.CUT,
+        MoveQueue.PasteResult make = pasteAndWait(context, new Clipboard.State(Mode.CUT,
                 Collections.singletonList(item(keep)), System.currentTimeMillis()), created, true);
         r.check("paste: createIfMissing makes the folder and moves into it",
                 make != null && make.refused == null && make.moved == 1 && "keep".equals(read(new File(created, "keep.txt")))
                         && !keep.exists(), make == null ? "no result" : "moved " + make.moved + ", refused " + make.refused);
+    }
+
+    private static void realCopyPaste(Report r, Context context, File base) throws Exception {
+        File dst = mkdir(new File(base, "copy"));
+        File file = write(new File(dst, "a.txt"), "A");
+        File folder = mkdir(new File(dst, "sub"));
+        write(new File(folder, "inner.txt"), "inner");
+        Clipboard.replace(context, Mode.COPY, Arrays.asList(item(file), item(folder)));
+        Clipboard.State snapshot = Clipboard.get(context);
+        MoveQueue.PasteResult first = pasteAndWait(context, snapshot, dst, false);
+        r.check("copy paste: same-folder file and folder were copied",
+                first != null && first.refused == null && first.copied == 2 && first.moved == 0 && first.failed == 0
+                        && "A".equals(read(new File(dst, "a (1).txt")))
+                        && "inner".equals(read(new File(dst, "sub (1)/inner.txt"))), null);
+        Clipboard.State retained = Clipboard.get(context);
+        r.check("copy paste: the clipboard stays available",
+                retained.mode == Mode.COPY && retained.createdAt == snapshot.createdAt && retained.items.size() == 2, null);
+        MoveQueue.PasteResult again = pasteAndWait(context, retained, dst, false);
+        r.check("copy paste: pasting again preserves the originals and both copies",
+                again != null && again.copied == 2 && again.failed == 0
+                        && "A".equals(read(file)) && "inner".equals(read(new File(folder, "inner.txt")))
+                        && "A".equals(read(new File(dst, "a (1).txt")))
+                        && "inner".equals(read(new File(dst, "sub (1)/inner.txt")))
+                        && "A".equals(read(new File(dst, "a (2).txt")))
+                        && "inner".equals(read(new File(dst, "sub (2)/inner.txt"))), null);
     }
 
     private static void interruptedPastes(Report r, Context context, File base) throws Exception {

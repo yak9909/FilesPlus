@@ -104,6 +104,11 @@ public final class VerifiedCopy {
 
     public static Result copy(Fs srcFs, String source, Fs dstFs, String folder, String name,
                               boolean removable, Job job, Cancellation cancellation, Observer observer) {
+        return copy(srcFs, source, dstFs, folder, name, removable, job, cancellation, observer, Long.MAX_VALUE);
+    }
+
+    public static Result copy(Fs srcFs, String source, Fs dstFs, String folder, String name,
+                              boolean removable, Job job, Cancellation cancellation, Observer observer, long maxBytes) {
         String opId = newOpId();
         Fs.Stat initial = null;
         Reason reason = Reason.IO;
@@ -118,6 +123,7 @@ public final class VerifiedCopy {
                 if (current == null || current.type != Fs.Type.FILE) throw new Failed(Reason.IO);
                 initial = current;
                 checkName(name, removable);
+                if (initial.size > maxBytes) throw new Failed(Reason.TOO_LARGE);
                 checkSpace(dstFs, folder, initial.size);
                 String target = once(srcFs, source, dstFs, folder, name, removable, initial,
                         opId, attempt, cancellation, observer);

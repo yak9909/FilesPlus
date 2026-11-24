@@ -21,9 +21,9 @@ import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
- * The FilesPlus clipboard (DESIGN 5.12.2): a list of files and folders that were cut, kept in
+ * The FilesPlus clipboard (DESIGN 5.12.2): a list of files and folders kept in
  * SharedPreferences {@code filesplus_clipboard} so it survives the process being killed. Contents older than
- * 24 hours are dropped by {@link #get}. Only CUT exists for now; COPY is added after the verified copy (S4).
+ * 24 hours are dropped by {@link #get}.
  * The same file keeps the records of running and cut-short pastes (see {@link #beginPaste}).
  *
  * <p>Temporary names are persisted before creation. Startup cleanup is delegated to InterruptedPastes.
@@ -53,8 +53,7 @@ public final class Clipboard {
 
     private Clipboard() {}
 
-    /** Only CUT is produced for now. */
-    public enum Mode { CUT }
+    public enum Mode { CUT, COPY }
 
     /** An immutable snapshot of the clipboard. {@code createdAt} is the time of the last change. */
     public static final class State {
@@ -66,6 +65,10 @@ public final class Clipboard {
             this.mode = mode;
             this.items = Collections.unmodifiableList(new ArrayList<>(items));
             this.createdAt = createdAt;
+        }
+
+        boolean canAdd(Mode offeredMode) {
+            return !isEmpty() && mode == offeredMode;
         }
 
         public boolean isEmpty() {
@@ -94,23 +97,25 @@ public final class Clipboard {
         return state;
     }
 
-    /** Replaces the contents with these items (a new "cut"). */
-    public static void cut(Context context, List<ClipItem> items) {
+    /** Replaces the contents with these items and mode. */
+    public static void replace(Context context, Mode mode, List<ClipItem> items) {
         synchronized (LOCK) {
-            write(context, Mode.CUT, unique(items), read(context).createdAt);
+            write(context, mode, unique(items), read(context).createdAt);
         }
         notifyListeners();
     }
 
     /** Adds items to the current contents (same mode). Equal paths are kept once. */
-    public static void add(Context context, List<ClipItem> items) {
+    static boolean add(Context context, Mode mode, List<ClipItem> items) {
         synchronized (LOCK) {
             State current = read(context);
+            if (!current.canAdd(mode) || System.currentTimeMillis() - current.createdAt > MAX_AGE_MS) return false;
             List<ClipItem> merged = new ArrayList<>(current.items);
             merged.addAll(items);
-            write(context, Mode.CUT, unique(merged), current.createdAt);
+            write(context, mode, unique(merged), current.createdAt);
         }
         notifyListeners();
+        return true;
     }
 
     public static void clear(Context context) {
@@ -128,7 +133,7 @@ public final class Clipboard {
         boolean changed = false;
         synchronized (LOCK) {
             State current = read(context);
-            if (current.createdAt == used.createdAt && !current.isEmpty()) {
+            if (used.mode == Mode.CUT && current.canAdd(Mode.CUT) && current.createdAt == used.createdAt) {
                 if (remaining.isEmpty()) {
                     prefs(context).edit().remove(KEY_MODE).remove(KEY_CREATED).remove(KEY_ITEMS).apply();
                 } else {
@@ -502,7 +507,7 @@ public final class Clipboard {
         String raw = prefs.getString(KEY_ITEMS, null);
         if (raw == null) return empty();
         try {
-            if (!Mode.CUT.name().equals(prefs.getString(KEY_MODE, Mode.CUT.name()))) throw new IllegalStateException("mode");
+            Mode mode = Mode.valueOf(prefs.getString(KEY_MODE, Mode.CUT.name()));
             JSONArray array = new JSONArray(raw);
             List<ClipItem> items = new ArrayList<>();
             for (int i = 0; i < array.length(); i++) {
@@ -514,7 +519,7 @@ public final class Clipboard {
                         o.optLong("s", 0), dir, o.optInt("c", dir ? ClipItem.UNKNOWN_COUNT : 1),
                         o.optBoolean("o", false)));
             }
-            return new State(Mode.CUT, items, prefs.getLong(KEY_CREATED, 0));
+            return new State(mode, items, prefs.getLong(KEY_CREATED, 0));
         } catch (Throwable t) {
             DiagLog.e(AREA, "Clipboard unreadable, cleared", t);
             prefs.edit().remove(KEY_MODE).remove(KEY_CREATED).remove(KEY_ITEMS).apply();

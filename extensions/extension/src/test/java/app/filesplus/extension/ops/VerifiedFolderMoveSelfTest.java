@@ -176,7 +176,7 @@ public final class VerifiedFolderMoveSelfTest {
 
     private static final class Fixture implements VerifiedCopy.Observer {
         final FaultFs src = new FaultFs(1);
-        final FaultFs dst = new FaultFs(2);
+        final FaultFs dst;
         final List<String> recorded = new ArrayList<>();
         final List<String> logs = new ArrayList<>();
         final VerifiedCopy.Job job = new VerifiedCopy.Job();
@@ -188,7 +188,10 @@ public final class VerifiedFolderMoveSelfTest {
         long trashFiles;
         long trashBytes;
 
-        Fixture() {
+        Fixture() { this(false); }
+
+        Fixture(boolean sameVolume) {
+            dst = sameVolume ? src : new FaultFs(2);
             src.dir("/src");
             src.dir(SOURCE);
             src.file(SOURCE + "/first", 1);
@@ -211,6 +214,11 @@ public final class VerifiedFolderMoveSelfTest {
                         trashFiles = count;
                         trashBytes = bytes;
                     }, budget);
+        }
+
+        VerifiedFolderMove.Result copyIntoSourceParent() {
+            return VerifiedFolderMove.copy(src, SOURCE, dst, "/src", "Folder", removable, job,
+                    () -> false, this, budget);
         }
 
         @Override public void partStarted(String path) {
@@ -506,7 +514,45 @@ public final class VerifiedFolderMoveSelfTest {
         refused(bytes, VerifiedCopy.Reason.TOO_LARGE, "later byte growth cannot exceed measured batch budget");
     }
 
-    public static void main(String[] args) throws IOException {
+    private static void copies() throws java.security.NoSuchAlgorithmException {
+        Fixture same = new Fixture(true);
+        Map<String, Fs.Stat> originals = new LinkedHashMap<>();
+        same.src.nodes.keySet().stream().filter(path -> path.equals(SOURCE) || path.startsWith(SOURCE + "/"))
+                .forEach(path -> originals.put(path, same.src.lstat(path)));
+        VerifiedFolderMove.Result result = same.copyIntoSourceParent();
+        expect("same-folder copy publishes Folder (1) with the complete layout",
+                result.reason == null && "/src/Folder (1)".equals(result.target)
+                        && complete(same, result.target, 2) && same.recorded.isEmpty() && same.dst.renameCount == 1);
+        java.security.MessageDigest sha = java.security.MessageDigest.getInstance("SHA-256");
+        for (Map.Entry<String, Fs.Stat> entry : originals.entrySet()) {
+            String path = entry.getKey();
+            expect("same-folder copy preserves the original " + path, entry.getValue().unchanged(same.src.lstat(path)));
+            if (entry.getValue().type == Fs.Type.FILE) {
+                String published = result.target + path.substring(SOURCE.length());
+                expect("matching SHA-256 for " + path,
+                        Arrays.equals(sha.digest(same.src.nodes.get(path).bytes), sha.digest(same.dst.nodes.get(published).bytes)));
+            }
+        }
+
+        Fixture failure = new Fixture(true);
+        Map<String, Node> before = new LinkedHashMap<>(failure.src.nodes);
+        failure.dst.flipWrites = 2;
+        VerifiedFolderMove.Result refused = failure.copyIntoSourceParent();
+        expect("same-folder hash failure removes its entire temporary tree",
+                refused.reason == VerifiedCopy.Reason.HASH_MISMATCH && failure.recorded.isEmpty()
+                        && failure.src.nodes.equals(before) && failure.src.renameCount == 0);
+
+        Fixture changed = new Fixture(true);
+        changed.afterPlan = () -> changed.src.file(SOURCE + "/new", 4);
+        VerifiedFolderMove.Result stale = changed.copyIntoSourceParent();
+        expect("copy refuses a changed source tree before publishing",
+                stale.reason == VerifiedCopy.Reason.SOURCE_CHANGED && changed.recorded.isEmpty()
+                        && changed.src.renameCount == 0 && changed.src.list("/src").equals(List.of("Folder"))
+                        && has(changed.src, SOURCE + "/new", 4));
+    }
+
+    public static void main(String[] args) throws Exception {
+        copies();
         prechecks();
         pasteLimits();
         moves();

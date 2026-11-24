@@ -30,7 +30,7 @@ public final class PasteRules {
     public enum Reason {
         /** Every item is already in the target folder. */
         SAME_FOLDER,
-        /** A cut folder would be pasted into itself or below itself. */
+        /** A source folder would be pasted into itself or below itself. */
         INTO_SELF,
         /** The target is missing, not a folder or not writable. */
         NOT_WRITABLE,
@@ -114,7 +114,7 @@ public final class PasteRules {
             if (item.isDir() || Files.isDirectory(source.toPath(), LinkOption.NOFOLLOW_LINKS)) {
                 if (within(destCanonical, source)) return Result.refused(Reason.INTO_SELF);
             }
-            if (same(source.getParentFile(), destCanonical)) inTarget++;
+            if (state.mode == Clipboard.Mode.CUT && same(source.getParentFile(), destCanonical)) inTarget++;
         }
         if (!sources.isEmpty() && inTarget == sources.size()) return Result.refused(Reason.SAME_FOLDER);
 
