@@ -1,3 +1,9 @@
+## [1.0.0-dev.28](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.27...v1.0.0-dev.28) (2026-11-24)
+
+### ✨ New Features
+
+* Save SMB settings as you edit and show changes at once ([392e30f](https://github.com/yak9909/FilesPlus/commit/392e30f633f1bfacbf55b30144ec0914f6d9b618))
+
 ## [1.0.0-dev.27](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.26...v1.0.0-dev.27) (2026-11-24)
 
 ### 🐛 Bug Fixes
