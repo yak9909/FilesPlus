@@ -1,3 +1,9 @@
+## [1.0.0-dev.30](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.29...v1.0.0-dev.30) (2026-11-24)
+
+### ✨ New Features
+
+* Choose grid columns for folders and files in the storage browser ([850f964](https://github.com/yak9909/FilesPlus/commit/850f964c79060befe577741cc2fd5c45e6a4c950))
+
 ## [1.0.0-dev.29](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.28...v1.0.0-dev.29) (2026-11-24)
 
 ### ✨ New Features
