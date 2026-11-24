@@ -32,6 +32,8 @@ import java.util.List;
  */
 public final class OriginalScreens {
     private static final String AREA = "screens";
+    private static final String EXTRA_OPENED_BY_SWITCH = "app.filesplus.extra.OPENED_BY_SWITCH";
+    private static final String EXTRA_SWITCH_VOLUME_URI = "app.filesplus.extra.SWITCH_VOLUME_URI";
 
     private static final String PKG = "com.google.android.apps.nbu.files.";
     private static final String STORAGE_ACTIVITY = PKG + "advancedbrowsing.browser.AdvancedBrowsingActivity";
@@ -222,22 +224,60 @@ public final class OriginalScreens {
             }
             byte[] hut = buildHut(from, stack, MODE_BROWSE, ENTRY_FROM_LIST);
             byte[] args = new ProtoNode().setMessage(1, ProtoNode.decode(hut)).encode();
-            return launch(from, STORAGE_ACTIVITY, args, false, 0, replace, shortToast);
+            return launch(from, STORAGE_ACTIVITY, args, false, 0, replace, shortToast, false);
         } catch (Throwable t) {
             return fail(from, "openStorage failed", t, shortToast);
+        }
+    }
+
+    /** Opens the switch target as the only breadcrumb entry, using its original folder title. */
+    public static boolean switchToStorage(Activity from, List<FolderRef> targetStack) {
+        try {
+            if (targetStack.isEmpty()) throw new IllegalArgumentException("empty stack");
+            ProtoNode target = folder(from, targetStack, targetStack.size() - 1);
+            // Keep folder existence checks on the target and volume catalogue checks on the volume.
+            target.setString(K_EXISTS_URI, target.getString(K_URI));
+            ProtoNode volume = folder(from, targetStack, 0);
+            return openStorageRoot(from, volume, target, true);
+        } catch (Throwable error) {
+            return fail(from, "switchToStorage failed", error, true);
         }
     }
 
     /** Launches the one-level browser request used by the app's All-storage row. */
     public static boolean openStorageRoot(Activity from, ProtoNode folder) {
         try {
-            ProtoNode hut = new ProtoNode().setMessage(H_ROOT, folder).addMessage(H_STACK, folder)
-                    .setVarint(H_MODE, MODE_BROWSE).setVarint(H_ENTRY, ENTRY_FROM_LIST);
-            byte[] args = new ProtoNode().setMessage(1, hut).encode();
-            return launch(from, STORAGE_ACTIVITY, args, false, 0, false, true);
+            return openStorageRoot(from, folder, folder, false);
         } catch (Throwable error) {
             return fail(from, "openStorageRoot failed", error, true);
         }
+    }
+
+    private static boolean openStorageRoot(Activity from, ProtoNode volume, ProtoNode folder, boolean fromSwitch) {
+        ProtoNode hut = new ProtoNode().setMessage(H_ROOT, volume).addMessage(H_STACK, folder)
+                .setVarint(H_MODE, MODE_BROWSE).setVarint(H_ENTRY, ENTRY_FROM_LIST);
+        byte[] args = new ProtoNode().setMessage(1, hut).encode();
+        return launch(from, STORAGE_ACTIVITY, args, false, 0, false, true, fromSwitch);
+    }
+
+    /** The local catalogue still decides whether the switch destination's volume is mounted. */
+    public static String watchedVolumeUri(Activity host, String nativeUri) {
+        try {
+            if (isStorageBrowser(host)) {
+                Intent intent = host.getIntent();
+                if (intent != null && intent.getBooleanExtra(EXTRA_OPENED_BY_SWITCH, false)) {
+                    String volumeUri = intent.getStringExtra(EXTRA_SWITCH_VOLUME_URI);
+                    if (volumeUri != null) return volumeUri;
+                }
+            }
+        } catch (Throwable error) {
+            volumeWatchError(error);
+        }
+        return nativeUri;
+    }
+
+    public static void volumeWatchError(Throwable error) {
+        DiagLog.e(AREA, "Could not read the switch volume for the storage watcher", error);
     }
 
     /**
@@ -249,13 +289,22 @@ public final class OriginalScreens {
     }
 
     public static boolean openMedia(Activity from, Category c, String tabNameOrNull, boolean replace, boolean shortToast) {
+        return openMedia(from, c, tabNameOrNull, replace, shortToast, false);
+    }
+
+    public static boolean switchToMedia(Activity from, Category c, String tabNameOrNull) {
+        return openMedia(from, c, tabNameOrNull, false, true, true);
+    }
+
+    private static boolean openMedia(Activity from, Category c, String tabNameOrNull, boolean replace,
+                                     boolean shortToast, boolean fromSwitch) {
         try {
             int isd = mediaCategory(c);
             if (isd == 0) return fail(from, "openMedia: unsupported category " + c, null, shortToast);
             ProtoNode jcp = new ProtoNode();
             if (tabNameOrNull != null && !tabNameOrNull.isEmpty()) jcp.setString(J_TAB, tabNameOrNull);
             jcp.setVarint(J_CATEGORY, isd).setVarint(J_ENTRY, 1);
-            return launch(from, MEDIA_ACTIVITY, jcp.encode(), false, 0, replace, shortToast);
+            return launch(from, MEDIA_ACTIVITY, jcp.encode(), false, 0, replace, shortToast, fromSwitch);
         } catch (Throwable t) {
             return fail(from, "openMedia failed", t, shortToast);
         }
@@ -268,7 +317,7 @@ public final class OriginalScreens {
             List<FolderRef> stack = stackFor(from, internal);
             byte[] hut = buildHut(from, stack, MODE_MOVE, 0);
             byte[] args = new ProtoNode().setMessage(1, ProtoNode.decode(hut)).encode();
-            return launch(from, PICKER_ACTIVITY, args, true, requestCode, false, false);
+            return launch(from, PICKER_ACTIVITY, args, true, requestCode, false, false, false);
         } catch (Throwable t) {
             return fail(from, "pickFolder failed", t);
         }
@@ -368,12 +417,21 @@ public final class OriginalScreens {
     // ---- validation and launch ----
 
     private static boolean launch(Activity from, String className, byte[] args, boolean forResult, int requestCode,
-                                  boolean replace, boolean shortToast) {
-        String problem = validate(from, className, args);
+                                  boolean replace, boolean shortToast, boolean fromSwitch) {
+        String problem = validate(className, args, fromSwitch);
         if (problem != null) return fail(from, "refused " + simple(className) + ": " + problem, null, shortToast);
         Intent intent = new Intent();
         intent.setComponent(new ComponentName(from, className));
         intent.putExtra(ScreenArgs.EXTRA, ScreenArgs.wrap(args));
+        if (fromSwitch) {
+            Intent current = from.getIntent();
+            replace = current != null && current.getBooleanExtra(EXTRA_OPENED_BY_SWITCH, false);
+            intent.putExtra(EXTRA_OPENED_BY_SWITCH, true);
+            if (STORAGE_ACTIVITY.equals(className)) {
+                ProtoNode volume = ProtoNode.decode(args).getMessage(1).getMessage(H_ROOT);
+                intent.putExtra(EXTRA_SWITCH_VOLUME_URI, volume.getString(K_URI));
+            }
+        }
         if (from.getPackageManager().resolveActivity(intent, 0) == null) {
             return fail(from, "refused " + simple(className) + ": activity not declared in the manifest", null, shortToast);
         }
@@ -388,7 +446,7 @@ public final class OriginalScreens {
     }
 
     /** Returns null when the bytes look safe for the screen, else a short reason. Never throws. */
-    private static String validate(Context ctx, String className, byte[] args) {
+    private static String validate(String className, byte[] args, boolean fromSwitch) {
         try {
             Class.forName(className, false, OriginalScreens.class.getClassLoader());
         } catch (Throwable t) {
@@ -398,7 +456,7 @@ public final class OriginalScreens {
             if (args == null) return "no arguments";
             ProtoNode top = ProtoNode.decode(args);
             if (MEDIA_ACTIVITY.equals(className)) return validateMedia(top);
-            return validateBrowser(top, PICKER_ACTIVITY.equals(className));
+            return validateBrowser(top, PICKER_ACTIVITY.equals(className), fromSwitch);
         } catch (Throwable t) {
             return "arguments do not decode (" + t + ")";
         }
@@ -410,7 +468,7 @@ public final class OriginalScreens {
         return null;
     }
 
-    private static String validateBrowser(ProtoNode wrapper, boolean picker) {
+    private static String validateBrowser(ProtoNode wrapper, boolean picker, boolean fromSwitch) {
         ProtoNode hut = wrapper.getMessage(1);
         if (hut == null) return "no hut";
         long mode = hut.getVarint(H_MODE, 0);
@@ -421,7 +479,21 @@ public final class OriginalScreens {
         if (problem != null) return "root: " + problem;
         List<ProtoNode> stack = hut.getMessages(H_STACK);
         if (stack.isEmpty()) return "empty stack";
-        if (!root.getString(K_URI).equals(stack.get(0).getString(K_URI))) return "stack does not start at the root";
+        if (fromSwitch) {
+            if (picker || mode != MODE_BROWSE || stack.size() != 1) return "invalid switch stack";
+            ProtoNode target = stack.get(0);
+            problem = checkFolder(target);
+            if (problem != null) return "switch target: " + problem;
+            String rootUri = root.getString(K_URI);
+            String targetUri = target.getString(K_URI);
+            if (!rootUri.startsWith("file:") || !targetUri.startsWith("file:")
+                    || root.getVarint(K_KIND, -1) != target.getVarint(K_KIND, -1)
+                    || !under(new File(Uri.parse(rootUri).getPath()), new File(Uri.parse(targetUri).getPath()))) {
+                return "switch target is outside its volume";
+            }
+        } else if (!root.getString(K_URI).equals(stack.get(0).getString(K_URI))) {
+            return "stack does not start at the root";
+        }
         for (int i = 0; i < stack.size(); i++) {
             problem = checkFolder(stack.get(i));
             if (problem != null) return "stack[" + i + "]: " + problem;

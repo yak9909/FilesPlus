@@ -207,7 +207,7 @@ public final class ViewSwitch {
     private static void openMedia(Activity host, File folder, Category category) {
         Context app = host.getApplicationContext();
         background(host, () -> mediaTabName(folder, LocalFolders.roots(app)),
-                tab -> OriginalScreens.openMedia(host, category == null ? Category.DOWNLOADS : category, tab, true, true));
+                tab -> OriginalScreens.switchToMedia(host, category == null ? Category.DOWNLOADS : category, tab));
     }
 
     static String mediaTabName(File folder, List<File> volumeRoots) throws IOException {
@@ -235,7 +235,7 @@ public final class ViewSwitch {
                     target = resolveAllTab(category, setting, root, last == null ? null : new File(last), latest);
                 }
                 return OriginalScreens.stackFor(app, target);
-            }, stack -> OriginalScreens.openStorage(host, stack, true, true));
+            }, stack -> OriginalScreens.switchToStorage(host, stack));
         } catch (Throwable error) { failed(host, error); }
     }
 
