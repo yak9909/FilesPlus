@@ -26,6 +26,9 @@ public final class ModSettings {
     public static final boolean DEFAULT_TABS_SHOW_EMPTY_FOLDERS = false;
     public static final boolean DEFAULT_TABS_SHOW_HIDDEN = false;
 
+    public static final String THUMBS_VIDEO_CACHE = "thumbs.video.cache";
+    public static final String THUMBS_VIDEO_LIMIT_MB = "thumbs.video.limitMb";
+
     public static final String PASTE_ALL_TAB = "paste.allTab";
 
     public static final String SWITCH_TO_MEDIA_CATEGORY = "switch.toMediaCategory";
