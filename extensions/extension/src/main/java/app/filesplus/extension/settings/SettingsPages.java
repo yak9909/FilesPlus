@@ -35,11 +35,15 @@ import app.filesplus.extension.ui.OriginalScreens;
 import app.filesplus.extension.ui.ScreenArgs;
 import java.io.File;
 import java.io.InputStream;
+import java.lang.ref.WeakReference;
 import java.lang.reflect.Proxy;
+import java.util.ArrayDeque;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.WeakHashMap;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 import java.util.function.Supplier;
 
 /** Page definitions only. The app owns the activity, preferences, switches, dialogs and input layouts. */
@@ -47,7 +51,9 @@ public final class SettingsPages {
     public static final String PAGE_EXTRA = "filesplus_page";
     private static final String ACTIVITY = "com.google.android.apps.nbu.files.settings.SettingsActivity";
     private static final int REQUEST_PICK_FOLDER = 0x4f53;
-    private static final int REQUEST_SMB_EDIT = 0x4f54;
+    private static final Executor SMB_WRITES = Executors.newSingleThreadExecutor(
+            action -> new Thread(action, "ModKit-smb-write"));
+    private static final Map<Activity, Long> SMB_LISTS = new WeakHashMap<>();
     private static final Map<Activity, String> TITLES = new WeakHashMap<>();
     private final PrefBridge bridge;
     private final Activity activity;
@@ -128,11 +134,6 @@ public final class SettingsPages {
 
     public static void onActivityResult(Activity activity, int requestCode, int resultCode, Intent data) {
         try {
-            if (requestCode == REQUEST_SMB_EDIT) {
-                // Rebuild the SMB list after an add, edit, rename or delete (posted: not inside the result dispatch).
-                activity.getWindow().getDecorView().post(activity::recreate);
-                return;
-            }
             if (requestCode != REQUEST_PICK_FOLDER) return;
             String picked = resultCode == Activity.RESULT_OK ? OriginalScreens.readPicked(data) : null;
             DiagLog.i("screens", "Picked folder: " + picked + " (result " + resultCode + ")");
@@ -150,7 +151,7 @@ public final class SettingsPages {
     private static boolean hasItems(String id) {
         return "tabs".equals(id) || "skip".equals(id) || "clipboard".equals(id)
                 || ("preview".equals(id) && PreviewHooks.longPressInstalled())
-                || ("switch".equals(id) && ViewSwitch.installed()) || "smb".equals(id) || "diag".equals(id)
+                || ("switch".equals(id) && ViewSwitch.installed()) || "smb".equals(id)
                 || ("thumbs".equals(id) && VideoThumbHooks.installed());
     }
 
@@ -173,7 +174,7 @@ public final class SettingsPages {
     private void populate() {
         switch (page) {
             case "root":
-                for (String id : new String[]{"tabs", "skip", "preview", "clipboard", "switch", "smb", "thumbs", "diag"}) {
+                for (String id : new String[]{"tabs", "skip", "preview", "clipboard", "switch", "smb", "thumbs"}) {
                     if (hasItems(id)) link(screen, id, titleOf(id));
                 }
                 break;
@@ -626,158 +627,266 @@ public final class SettingsPages {
         });
     }
 
-    /** SMB has existing controls, so it is a populated page, not a placeholder. */
     private void smb() {
         if (activity.getIntent().getBooleanExtra("filesplus_smb_test", false)) {
-            editConnection(null, true);
+            editConnection(null, null, true);
             return;
         }
         String id = activity.getIntent().getStringExtra("filesplus_connection");
         if (id != null) {
-            SmbConnection connection = "new".equals(id) ? null : SmbConnectionStore.get(id);
-            if (!"new".equals(id) && connection == null) throw new IllegalStateException("Connection no longer exists");
-            editConnection(connection, false);
+            SmbConnection connection = SmbConnectionStore.get(id);
+            if (connection == null && !activity.getIntent().getBooleanExtra("filesplus_smb_new", false)) {
+                throw new IllegalStateException("Connection no longer exists");
+            }
+            editConnection(connection, id, false);
             return;
         }
-        // The editor returns here when it finishes; onActivityResult then rebuilds this list.
+        SMB_LISTS.put(activity, SmbRoots.revision());
+        SmbRoots.trackActivities(activity);
         for (SmbConnection connection : SmbConnectionStore.all()) {
-            row(screen, connection.label(), smbSummary(connection), () -> activity.startActivityForResult(
-                    intent(activity, "smb").putExtra("filesplus_connection", connection.id), REQUEST_SMB_EDIT));
+            Object pref = row(screen, connection.label(), smbSummary(connection), () -> activity.startActivity(
+                    intent(activity, "smb").putExtra("filesplus_connection", connection.id)));
+            WeakReference<SettingsPages> owner = new WeakReference<>(this);
+            SmbSwipe.register(pref, restore -> {
+                SettingsPages pages = owner.get();
+                if (pages == null) restore.run();
+                else pages.confirmDelete(connection, restore);
+            });
         }
-        row(screen, tr("接続先を追加", "Add a connection"), null, () -> activity.startActivityForResult(
-                intent(activity, "smb").putExtra("filesplus_connection", "new"), REQUEST_SMB_EDIT));
+        row(screen, tr("接続先を追加", "Add a connection"), null, () -> activity.startActivity(
+                intent(activity, "smb").putExtra("filesplus_connection", SmbConnection.newId())
+                        .putExtra("filesplus_smb_new", true)));
     }
 
-    private static final class ConnectionForm {
-        String name = "", host = "", port = "445", share = "", start = "", user = "", password = "", domain = "";
-        boolean openStart;
-        boolean busy;
+    public static void refreshSmbList(Activity host) {
+        try {
+            Long shown = SMB_LISTS.get(host);
+            if (shown != null && shown != SmbRoots.revision() && !host.isFinishing() && !host.isDestroyed()) {
+                SMB_LISTS.remove(host);
+                host.recreate();
+            }
+        } catch (Throwable t) { hookError(t); }
+    }
+
+    private void confirmDelete(SmbConnection connection, Runnable restore) {
+        Dialog dialog = bridge.dialog(activity, tr("接続先の削除", "Delete connection"),
+                reportView(tr("「" + connection.label() + "」を削除します。保存したパスワードも消えます。",
+                        "Delete \"" + connection.label() + "\"? The saved password is removed too.")),
+                tr("削除", "Delete"), tr("キャンセル", "Cancel"));
+        dialog.setOnDismissListener(d -> restore.run());
+        dialog.show();
+        View button = dialog.findViewById(android.R.id.button1);
+        if (button == null) { dialog.dismiss(); throw new IllegalStateException("Delete button missing"); }
+        button.setOnClickListener(v -> safely(() -> {
+            dialog.dismiss();
+            SMB_WRITES.execute(() -> SmbConnectionStore.delete(connection.id));
+        }));
     }
 
     private interface FieldValue { void set(String value); }
 
-    private void field(String title, Supplier<String> value, int type, FieldValue save, boolean secret) {
+    private void field(String title, Supplier<String> value, int type, FieldValue save,
+            boolean secret, ConnectionEditor editor) {
         Object pref = preference(title, secret ? null : value.get());
-        // The form is read again at click time, so the dialog never shows a value from before an earlier edit.
         bridge.setClick(pref, listener(bridge.clickType(), () -> safely(() -> input(title, value.get(), type, typed -> {
             save.set(typed);
             if (!secret) bridge.setSummary(pref, typed);
+            editor.changed();
             return null;
         }))));
         bridge.addTo(screen, pref);
     }
 
-    private void editConnection(SmbConnection existing, boolean testOnly) {
-        ConnectionForm form = new ConnectionForm();
-        if (existing != null) {
-            form.name = existing.displayName; form.host = existing.host; form.port = String.valueOf(existing.port);
-            form.share = existing.share; form.start = existing.startPath; form.user = existing.user;
-            form.domain = existing.domain; form.openStart = SmbConnection.OPEN_START.equals(existing.openWhere);
-        }
+    private void editConnection(SmbConnection existing, String id, boolean testOnly) {
+        ConnectionEditor editor = new ConnectionEditor(existing, id, testOnly);
+        SmbConnectionForm form = editor.form;
         int text = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
-        field(tr("ホスト", "Host"), () -> form.host, text | InputType.TYPE_TEXT_VARIATION_URI, v -> form.host = v, false);
-        field(tr("ユーザー（空欄でゲスト）", "User (blank for guest)"), () -> form.user, text, v -> form.user = v, false);
-        String passwordTitle = existing != null && SmbConnectionStore.hasPassword(existing.id)
+        field(tr("ホスト", "Host"), () -> form.host, text | InputType.TYPE_TEXT_VARIATION_URI,
+                v -> form.host = v, false, editor);
+        field(tr("ユーザー（空欄でゲスト）", "User (blank for guest)"), () -> form.user, text,
+                v -> form.user = v, false, editor);
+        String passwordTitle = editor.hasPassword
                 ? tr("パスワード（空欄で変更しない）", "Password (blank keeps it)") : tr("パスワード", "Password");
         field(passwordTitle, () -> "", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD,
-                v -> form.password = v, true);
-        field(tr("表示名（任意）", "Display name (optional)"), () -> form.name, text, v -> form.name = v, false);
-        field(tr("ポート", "Port"), () -> form.port, InputType.TYPE_CLASS_NUMBER, v -> form.port = v, false);
+                v -> form.password = v, true, editor);
+        field(tr("表示名（任意）", "Display name (optional)"), () -> form.name, text,
+                v -> form.name = v, false, editor);
+        field(tr("ポート", "Port"), () -> form.port, InputType.TYPE_CLASS_NUMBER, v -> form.port = v, false, editor);
         field(tr("共有名（空欄なら共有の一覧）", "Share name (blank lists shares)"), () -> form.share, text,
-                v -> form.share = v, false);
+                v -> form.share = v, false, editor);
         field(tr("開始フォルダ（共有名が空なら 共有名/フォルダ）", "Start folder (share/folder when no share name)"),
-                () -> form.start, text, v -> form.start = v, false);
-        field(tr("ドメイン（任意）", "Domain (optional)"), () -> form.domain, text, v -> form.domain = v, false);
-        Object open = row(screen, tr("開く場所", "Open at"),
-                form.openStart ? tr("開始フォルダ", "Start folder") : tr("前回開いていたフォルダ", "Last folder"), null);
+                () -> form.start, text, v -> form.start = v, false, editor);
+        field(tr("ドメイン（任意）", "Domain (optional)"), () -> form.domain, text, v -> form.domain = v, false, editor);
+        Object open = row(screen, tr("開く場所", "Open at"), openAt(form), null);
         bridge.setClick(open, listener(bridge.clickType(), () -> safely(() -> choices(tr("開く場所", "Open at"),
                 new String[]{tr("開始フォルダ", "Start folder"), tr("前回開いていたフォルダ", "Last folder")},
                 form.openStart ? 0 : 1, selected -> {
                     form.openStart = selected == 0;
-                    bridge.setSummary(open, form.openStart ? tr("開始フォルダ", "Start folder") : tr("前回開いていたフォルダ", "Last folder"));
+                    bridge.setSummary(open, openAt(form));
+                    editor.changed();
                 }))));
-        Object status = row(screen, tr("状態", "Status"), "", null);
-        if (!testOnly) row(screen, tr("保存", "Save"), null, () -> saveConnection(form, existing, status));
-        row(screen, tr("接続テスト", "Connection test"), null, () -> testConnection(form, existing, status, testOnly));
-        if (existing != null) {
-            row(screen, tr("名前の変更", "Rename"), null, () ->
-                    input(tr("名前の変更", "Rename"), form.name, text, value -> {
-                        SmbConnectionStore.setDisplayName(existing.id, value);
-                        activity.finish();
-                        return null;
-                    }));
-            row(screen, tr("削除", "Delete"), null, () -> {
-                Dialog dialog = bridge.dialog(activity, tr("接続先の削除", "Delete connection"),
-                        reportView(tr("「" + existing.label() + "」を削除します。保存したパスワードも消えます。",
-                                "Delete \"" + existing.label() + "\"? The saved password is removed too.")),
-                        tr("削除", "Delete"), tr("キャンセル", "Cancel"));
-                dialog.show();
-                View button = dialog.findViewById(android.R.id.button1);
-                if (button == null) { dialog.dismiss(); throw new IllegalStateException("Delete button missing"); }
-                button.setOnClickListener(v -> safely(() -> {
-                    SmbConnectionStore.delete(existing.id); dialog.dismiss(); activity.finish();
-                }));
-            });
+        editor.status = row(screen, tr("状態", "Status"), "", null);
+        editor.showError(form.error(existing, editor.hasPassword, !testOnly));
+        row(screen, tr("接続テスト", "Connection test"), null, editor::test);
+        if (!testOnly && existing == null) editor.refreshAfterFirstSave();
+    }
+
+    private String openAt(SmbConnectionForm form) {
+        return form.openStart ? tr("開始フォルダ", "Start folder") : tr("前回開いていたフォルダ", "Last folder");
+    }
+
+    private static final class ConnectionEdit {
+        final SmbConnection connection;
+        final String password;
+        final int revision;
+
+        ConnectionEdit(SmbConnection connection, String password, int revision) {
+            this.connection = connection;
+            this.password = password;
+            this.revision = revision;
         }
     }
 
-    private SmbConnection readConnection(ConnectionForm form, SmbConnection existing) {
-        int port;
-        try { port = Integer.parseInt(form.port.trim()); } catch (NumberFormatException e) { port = 0; }
-        if (form.host.trim().isEmpty()) throw new IllegalArgumentException(tr("ホストを入力してください", "Enter a host"));
-        if (port < 1 || port > 65535) throw new IllegalArgumentException(tr("ポートは1〜65535です", "Port must be 1–65535"));
-        if (form.share.indexOf('/') >= 0 || form.share.indexOf('\\') >= 0)
-            throw new IllegalArgumentException(tr("共有名に / や \\ は使えません", "No / or \\ in a share name"));
-        String start = SmbPath.normalize(form.start);
-        SmbConnection result = new SmbConnection(existing == null ? null : existing.id, form.name, form.host, port,
-                form.share, start, form.user, form.domain,
-                form.openStart ? SmbConnection.OPEN_START : SmbConnection.OPEN_LAST, existing == null ? "" : existing.lastPath);
-        if (existing != null && !result.user.isEmpty() && form.password.isEmpty()
-                && !result.credentialKey().equals(existing.credentialKey()))
-            throw new IllegalArgumentException(tr("ホスト・ユーザーを変えたときはパスワードを入力してください",
-                    "Enter the password when the host or user changes"));
-        return result;
-    }
+    /** UI-thread draft state. Valid field changes are saved in order with the same connection id. */
+    private final class ConnectionEditor {
+        final SmbConnectionForm form;
+        final boolean testOnly;
+        SmbConnection saved;
+        Object status;
+        final ArrayDeque<ConnectionEdit> edits = new ArrayDeque<>();
+        ConnectionEdit writing;
+        boolean hasPassword;
+        boolean testing;
+        int revision;
+        int statusRevision;
 
-    private void saveConnection(ConnectionForm form, SmbConnection existing, Object status) {
-        if (form.busy) return;
-        SmbConnection connection = readConnection(form, existing);
-        String password = connection.user.isEmpty() ? "" : form.password.isEmpty() ? null : form.password;
-        form.busy = true;
-        bridge.setSummary(status, tr("保存中…", "Saving…"));
-        new Thread(() -> {
-            boolean saved = SmbConnectionStore.save(connection, password);
-            activity.runOnUiThread(() -> safely(() -> {
-                form.busy = false;
-                if (activity.isFinishing() || activity.isDestroyed()) return;
-                if (saved) activity.finish();
-                else bridge.setSummary(status, tr("保存できませんでした。保存データとパスワードを確認してください",
-                        "Could not save. Check saved data and password."));
-            }));
-        }, "ModKit-smb-save").start();
-    }
+        ConnectionEditor(SmbConnection existing, String id, boolean testOnly) {
+            form = new SmbConnectionForm(existing, id);
+            saved = existing;
+            this.testOnly = testOnly;
+            hasPassword = existing != null && SmbConnectionStore.hasPassword(existing.id);
+        }
 
-    private void testConnection(ConnectionForm form, SmbConnection existing, Object status, boolean fullTest) {
-        if (form.busy) return;
-        SmbConnection connection = readConnection(form, existing);
-        String password = form.password;
-        form.busy = true;
-        bridge.setSummary(status, tr("接続中… 最大で1分ほどかかります", "Connecting… this may take up to a minute"));
-        new Thread(() -> {
-            String result;
-            try {
-                result = fullTest ? SmbTester.run(connection.host, connection.port, connection.user, password,
-                        connection.domain, connection.share, connection.startPath)
-                        : runSmbConnectionTest(connection, password, existing);
-            } catch (Throwable t) { result = smbErrorText(t); }
-            String report = result;
-            activity.runOnUiThread(() -> safely(() -> {
-                form.busy = false;
-                if (activity.isFinishing() || activity.isDestroyed()) return;
-                bridge.setSummary(status, report);
-                report(tr("SMB テストの結果", "SMB test result"), report, true);
-            }));
-        }, "ModKit-smb-test").start();
+        void refreshAfterFirstSave() {
+            // A rotated editor can be built before the previous activity's first write has committed.
+            SMB_WRITES.execute(() -> {
+                if (SmbConnectionStore.get(form.id) == null) return;
+                activity.runOnUiThread(() -> safely(() -> {
+                    if (revision == 0 && !activity.isFinishing() && !activity.isDestroyed()) activity.recreate();
+                }));
+            });
+        }
+
+        void changed() {
+            if (testOnly) {
+                revision++;
+                showError(form.error(null, false, false));
+                return;
+            }
+            ConnectionEdit ahead = edits.isEmpty() ? writing : edits.peekLast();
+            SmbConnection expected = ahead == null ? saved : ahead.connection;
+            boolean expectedPassword = ahead == null ? hasPassword : !ahead.connection.user.isEmpty();
+            SmbConnectionForm.Error error = form.error(expected, expectedPassword, true);
+            if (error != null) {
+                statusRevision = ++revision;
+                showError(error);
+                return;
+            }
+            SmbConnection next = form.connection();
+            String password = next.user.isEmpty() || form.password.isEmpty() ? null : form.password;
+            if (!SmbConnectionForm.needsSave(next, expected, password)) {
+                if (ahead != null) statusRevision = ahead.revision;
+                if (!testing) summary(ahead == null ? tr("保存しました", "Saved") : tr("保存中…", "Saving…"));
+                return;
+            }
+            if (password != null) form.password = "";
+            statusRevision = ++revision;
+            edits.addLast(new ConnectionEdit(next, password, statusRevision));
+            summary(tr("保存中…", "Saving…"));
+            persist();
+        }
+
+        void persist() {
+            if (writing != null || edits.isEmpty()) return;
+            ConnectionEdit edit = edits.removeFirst();
+            writing = edit;
+            SmbConnection previous = saved;
+            SMB_WRITES.execute(() -> {
+                // The same launch ID identifies the draft across rotation. Read behind the older queued write.
+                SmbConnection baseline = previous == null ? SmbConnectionStore.get(edit.connection.id) : previous;
+                boolean storedPassword = baseline != null && SmbConnectionStore.hasPassword(baseline.id);
+                SmbConnectionForm.Error error = SmbConnectionForm.passwordError(
+                        edit.connection, edit.password != null, baseline, storedPassword);
+                String password = edit.connection.user.isEmpty() ? "" : edit.password;
+                boolean success = error == null && (!SmbConnectionForm.needsSave(edit.connection, baseline, edit.password)
+                        || SmbConnectionStore.save(edit.connection, password, baseline));
+                activity.runOnUiThread(() -> safely(() -> {
+                    writing = null;
+                    saved = success ? edit.connection : baseline;
+                    hasPassword = success && password != null ? !password.isEmpty() : storedPassword;
+                    if (edit.revision == statusRevision) {
+                        if (!success && edit.password != null) form.password = edit.password;
+                        if (error != null) showError(error);
+                        else summary(success ? tr("保存しました", "Saved")
+                                : tr("保存できませんでした。保存データとパスワードを確認してください",
+                                        "Could not save. Check saved data and password."));
+                    }
+                    persist();
+                }));
+            });
+        }
+
+        boolean showError(SmbConnectionForm.Error error) {
+            if (error == null) {
+                summary("");
+                return false;
+            }
+            switch (error) {
+                case HOST: summary(tr("ホストを入力してください", "Enter a host")); break;
+                case PORT: summary(tr("ポートは1〜65535です", "Port must be 1–65535")); break;
+                case SHARE: summary(tr("共有名に / や \\ は使えません", "No / or \\ in a share name")); break;
+                case PATH: summary(tr("開始フォルダを確認してください", "Check the start folder")); break;
+                case PASSWORD: summary(tr("パスワードを入力してください", "Enter the password")); break;
+                case CHANGED_CREDENTIALS:
+                    summary(tr("ホスト・ユーザーを変えたときはパスワードを入力してください",
+                            "Enter the password when the host or user changes"));
+                    break;
+            }
+            return true;
+        }
+
+        void summary(String value) {
+            if (!activity.isFinishing() && !activity.isDestroyed()) bridge.setSummary(status, value);
+        }
+
+        void test() {
+            if (writing != null) {
+                summary(tr("保存中です。少し待ってからもう一度お試しください。", "Saving… try again in a moment"));
+                return;
+            }
+            if (testing || showError(form.error(saved, hasPassword, !testOnly))) return;
+            SmbConnection connection = form.connection();
+            SmbConnection stored = saved;
+            String password = form.password;
+            int tested = revision;
+            testing = true;
+            summary(tr("接続中… 最大で1分ほどかかります", "Connecting… this may take up to a minute"));
+            new Thread(() -> {
+                String result;
+                try {
+                    result = testOnly ? SmbTester.run(connection.host, connection.port, connection.user, password,
+                            connection.domain, connection.share, connection.startPath)
+                            : runSmbConnectionTest(connection, password, stored);
+                } catch (Throwable t) { result = smbErrorText(t); }
+                String message = result;
+                activity.runOnUiThread(() -> safely(() -> {
+                    testing = false;
+                    if (tested != revision || activity.isFinishing() || activity.isDestroyed()) return;
+                    summary(message);
+                    report(tr("SMB テストの結果", "SMB test result"), message, true);
+                }));
+            }, "ModKit-smb-test").start();
+        }
     }
 
     private View reportView(String text) {

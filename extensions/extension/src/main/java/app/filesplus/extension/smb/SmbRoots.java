@@ -1,30 +1,50 @@
 package app.filesplus.extension.smb;
 
 import android.app.Activity;
+import android.app.Application;
 import android.content.Context;
 import android.net.Uri;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.DocumentsContract;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
 import android.widget.Toast;
+import android.widget.TextView;
 
 import app.filesplus.extension.DiagLog;
 import app.filesplus.extension.ModKit;
 import app.filesplus.extension.settings.SettingsHooks;
+import app.filesplus.extension.settings.SettingsPages;
 import app.filesplus.extension.ui.OriginalScreens;
 import app.filesplus.extension.ui.ProtoNode;
 import app.filesplus.extension.ui.ScreenArgs;
 
+import java.lang.ref.WeakReference;
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.WeakHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 /** Native All-storage roots and the read-only controls for the SMB DocumentsProvider. */
 public final class SmbRoots {
     private static final String HOME = "com.google.android.apps.nbu.files.home.HomeActivity";
+    private static final AtomicLong REVISION = new AtomicLong();
+    // The observer and its list are owned by the native Home fragment.
+    private static final Map<Activity, HomeList> HOMES = new WeakHashMap<>();
+    private static final Map<Activity, Browser> BROWSERS = new WeakHashMap<>();
+    private static final Set<Activity> RESUMED = Collections.newSetFromMap(new WeakHashMap<>());
+    private static boolean trackingActivities;
+    // Both native catalogue deliveries run synchronously on the main thread.
+    private static boolean bareRefresh;
+
     private static final String AUTHORITY_SUFFIX = ".smb.documents";
     private static final String[] WRITE_ITEMS = {
             "delete_action", "rename_action", "move_to_action", "copy_to_action", "compress_action",
@@ -96,11 +116,132 @@ public final class SmbRoots {
         }
     }
 
-    /** The original list belongs to the loader. Give the adapter a new snapshot only if a row was added. */
-    public static List<?> append(List<?> original, Activity host) {
+    /** Implemented by the native All storage catalogue observer. */
+    public interface RootRefresh {
+        void modKitRefreshSmbRoots(List<?> original);
+    }
+
+    private static final class HomeList {
+        final WeakReference<RootRefresh> observer;
+        final List<?> original;
+        final long revision;
+
+        HomeList(RootRefresh observer, List<?> original, long revision) {
+            this.observer = new WeakReference<>(observer);
+            this.original = original;
+            this.revision = revision;
+        }
+    }
+
+    private static final class Browser {
+        final String id;
+        final SmbConnection opened;
+        final long revision;
+        boolean dirty;
+
+        Browser(String id, SmbConnection opened, long revision) {
+            this.id = id;
+            this.opened = opened;
+            this.revision = revision;
+        }
+    }
+
+    public static long revision() {
+        return REVISION.get();
+    }
+
+    /** Called on the UI thread when a Home list, SMB browser or SMB settings list is created. */
+    public static void trackActivities(Activity host) {
         try {
-            if (host == null || !HOME.equals(host.getClass().getName()) || original == null || original.isEmpty()) {
-                return original;
+            if (trackingActivities) return;
+            host.getApplication().registerActivityLifecycleCallbacks(new Application.ActivityLifecycleCallbacks() {
+                @Override public void onActivityCreated(Activity activity, Bundle state) {}
+                @Override public void onActivityStarted(Activity activity) {}
+                @Override public void onActivityResumed(Activity activity) {
+                    try {
+                        RESUMED.add(activity);
+                        // Let the native Activity finish its own resume dispatch before relaunching a screen.
+                        new Handler(Looper.getMainLooper()).post(() -> refresh(activity));
+                    } catch (Throwable t) { hookError(t); }
+                }
+                @Override public void onActivityPaused(Activity activity) { RESUMED.remove(activity); }
+                @Override public void onActivityStopped(Activity activity) {}
+                @Override public void onActivitySaveInstanceState(Activity activity, Bundle state) {}
+                @Override public void onActivityDestroyed(Activity activity) {
+                    RESUMED.remove(activity);
+                    HOMES.remove(activity);
+                    BROWSERS.remove(activity);
+                }
+            });
+            trackingActivities = true;
+            // The first Home subscription can emit after its Activity has already resumed.
+            if (host.hasWindowFocus()) RESUMED.add(host);
+        } catch (Throwable t) { hookError(t); }
+    }
+
+    /** The store calls this after writing and invalidating the connection. */
+    static void connectionChanged(String id) {
+        try {
+            long revision = REVISION.incrementAndGet();
+            new Handler(Looper.getMainLooper()).post(() -> {
+                try {
+                    for (Browser browser : BROWSERS.values()) {
+                        if (browser.id.equals(id) && browser.revision < revision) browser.dirty = true;
+                    }
+                    for (Activity host : new ArrayList<>(RESUMED)) refresh(host);
+                } catch (Throwable t) { hookError(t); }
+            });
+        } catch (Throwable t) { hookError(t); }
+    }
+
+    private static void refresh(Activity host) {
+        try {
+            if (host == null || !RESUMED.contains(host) || host.isFinishing() || host.isDestroyed()) return;
+            HomeList home = HOMES.get(host);
+            if (home != null && home.revision != revision()) {
+                RootRefresh observer = home.observer.get();
+                if (observer == null) HOMES.remove(host);
+                else {
+                    replayHomeRoots(observer, home.original);
+                    DiagLog.i("smb", "Home roots refreshed rev=" + revision());
+                }
+            }
+            SettingsPages.refreshSmbList(host);
+            Browser browser = BROWSERS.get(host);
+            if (browser == null || !browser.dirty) return;
+            browser.dirty = false;
+            SmbConnection connection = SmbConnectionStore.get(browser.id);
+            if (connection == null || reopen(host, connection)) host.finish();
+        } catch (Throwable t) { hookError(t); }
+    }
+
+    private static boolean reopen(Activity host, SmbConnection connection) {
+        Root root = root(host, connection);
+        return OriginalScreens.openStorageRoot(host, folder(root.label, root.tree));
+    }
+
+    static void replayHomeRoots(RootRefresh observer, List<?> original) {
+        // The native diff compares stable URI and free space. Remove and reinsert the SMB rows to force a bind.
+        bareRefresh = true;
+        try {
+            observer.modKitRefreshSmbRoots(original);
+        } finally {
+            bareRefresh = false;
+        }
+        observer.modKitRefreshSmbRoots(original);
+    }
+
+    static boolean shouldAppendHomeRoots(String hostName, List<?> original) {
+        return !bareRefresh && HOME.equals(hostName) && original != null && !original.isEmpty();
+    }
+
+    /** The original list belongs to the loader. Give the adapter a new snapshot only if a row was added. */
+    public static List<?> append(List<?> original, Activity host, RootRefresh observer) {
+        try {
+            if (host == null || !shouldAppendHomeRoots(host.getClass().getName(), original)) return original;
+            if (observer != null) {
+                trackActivities(host);
+                HOMES.put(host, new HomeList(observer, original, revision()));
             }
             List<Object> rows = new ArrayList<>(original);
             Set<String> locations = new HashSet<>();
@@ -125,6 +266,106 @@ public final class SmbRoots {
     /** The patch fills this with reads of the exact fields used by the native row binder. */
     private static boolean validRow(Object row, String label, String tree) { return false; }
 
+    /** Restores the saved spelling at the native All storage title view. */
+    public static void bindRootLabel(View view, Object folder) {
+        try {
+            String label = folderLabel(ScreenArgs.serialize(folder), view.getContext());
+            if (label == null) return;
+            View title = view.findViewById(id(view.getContext(), "id", "title"));
+            if (title instanceof TextView) ((TextView) title).setText(label);
+        } catch (Throwable t) { hookError(t); }
+    }
+
+    /** The toolbar uses the first folder in the same native stack as its breadcrumb. */
+    public static void bindBrowserTitle(Activity host, Object currentFolder) {
+        try {
+            byte[] bytes = ScreenArgs.serialize(currentFolder);
+            if (!isEntry(bytes, 2)) return;
+            ProtoNode root = launchRoot(host);
+            if (root == null) return;
+            String title = folderLabel(root.encode(), host);
+            if (title != null) host.setTitle(title);
+            String location = ProtoNode.decode(bytes).getString(2);
+            Uri uri = Uri.parse(location);
+            SmbDocId doc = SmbDocId.decode(DocumentsContract.isDocumentUri(host, uri)
+                    ? DocumentsContract.getDocumentId(uri) : DocumentsContract.getTreeDocumentId(uri));
+            Browser browser = BROWSERS.get(host);
+            if (browser != null && browser.opened != null && browser.id.equals(doc.connectionId)) {
+                SmbConnectionStore.setLastPath(browser.opened, doc.path);
+            }
+        } catch (Throwable t) { hookError(t); }
+    }
+
+    public static List<?> fixBreadcrumb(List<?> original, Object hut, Context context) {
+        try {
+            List<ProtoNode> stack = ProtoNode.decode(ScreenArgs.serialize(hut)).getMessages(2);
+            if (stack.isEmpty() || original.isEmpty()) return original;
+            String label = folderLabel(stack.get(0).encode(), context);
+            if (label == null) return original;
+            List<Object> copy = new ArrayList<>(original);
+            copy.set(0, label);
+            return copy;
+        } catch (Throwable t) {
+            hookError(t);
+            return original;
+        }
+    }
+
+    private static String folderLabel(byte[] bytes, Context context) {
+        if (bytes == null || context == null) return null;
+        ProtoNode folder = ProtoNode.decode(bytes);
+        return isLocation(context.getPackageName(), folder.getString(2)) ? folder.getString(1) : null;
+    }
+
+    private static ProtoNode launchRoot(Activity host) {
+        byte[] bytes = ScreenArgs.readExtra(host.getIntent(), ScreenArgs.EXTRA);
+        if (bytes == null) return null;
+        ProtoNode hut = ProtoNode.decode(bytes).getMessage(1);
+        return hut == null ? null : hut.getMessage(1);
+    }
+
+    /** Resolves the latest settings before the app parses an SMB browser's launch arguments. */
+    public static void prepareBrowser(Activity host, Bundle state) {
+        try {
+            long revision = revision();
+            ProtoNode root = launchRoot(host);
+            if (root == null || !isLocation(host.getPackageName(), root.getString(2))) return;
+            Uri tree = Uri.parse(root.getString(2));
+            SmbDocId doc = SmbDocId.decode(DocumentsContract.getTreeDocumentId(tree));
+            SmbConnection connection = SmbConnectionStore.get(doc.connectionId);
+            trackActivities(host);
+            Browser browser = new Browser(doc.connectionId, connection, revision);
+            BROWSERS.put(host, browser);
+            if (connection == null) {
+                browser.dirty = true;
+                return;
+            }
+            if (state != null) return;
+            byte[] original = ScreenArgs.readExtra(host.getIntent(), ScreenArgs.EXTRA);
+            ProtoNode request = ProtoNode.decode(original);
+            ProtoNode hut = request.getMessage(1);
+            List<ProtoNode> stack = hut.getMessages(2);
+            root.setString(1, connection.label());
+            hut.setMessage(1, root).setMessage(2, root);
+            if (stack.size() > 1) {
+                for (int i = 1; i < stack.size(); i++) hut.addMessage(2, stack.get(i));
+            } else {
+                String path = "";
+                String parent = tree.toString();
+                for (String segment : SmbPath.normalize(connection.initialPath()).split("/")) {
+                    if (segment.isEmpty()) break;
+                    path = SmbPath.join(path, segment);
+                    String child = DocumentsContract.buildDocumentUriUsingTree(tree, SmbDocId.encode(connection.id, path))
+                            .toString();
+                    hut.addMessage(2, folder(segment, child).setString(3, parent));
+                    parent = child;
+                }
+            }
+            byte[] updated = request.setMessage(1, hut).encode();
+            host.getIntent().putExtra(ScreenArgs.EXTRA, ScreenArgs.wrap(updated));
+        } catch (Throwable t) { hookError(t); }
+    }
+
     public static boolean openFirst(Activity host) {
         try {
             List<SmbConnection> saved = SmbConnectionStore.all();
@@ -133,8 +374,7 @@ public final class SmbRoots {
                         : "No saved SMB connections", Toast.LENGTH_SHORT).show();
                 return false;
             }
-            Root root = root(host, saved.get(0));
-            return OriginalScreens.openStorageRoot(host, folder(root.label, root.tree));
+            return reopen(host, saved.get(0));
         } catch (Throwable error) {
             hookError(error);
             return false;

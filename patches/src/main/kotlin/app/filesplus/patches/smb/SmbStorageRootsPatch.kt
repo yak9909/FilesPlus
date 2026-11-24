@@ -9,9 +9,11 @@ import app.filesplus.patches.preview.code
 import app.filesplus.patches.preview.literal
 import app.filesplus.patches.preview.ref
 import app.filesplus.patches.preview.string
+import app.filesplus.patches.screens.openStackPatch
 import app.filesplus.patches.shared.Constants
 import app.morphe.patcher.extensions.InstructionExtensions.addInstructions
 import app.morphe.patcher.extensions.InstructionExtensions.addInstructionsWithLabels
+import app.morphe.patcher.extensions.InstructionExtensions.replaceInstruction
 import app.morphe.patcher.patch.BytecodePatchContext
 import app.morphe.patcher.patch.bytecodePatch
 import app.morphe.patcher.util.proxy.mutableTypes.MutableMethod
@@ -20,12 +22,18 @@ import com.android.tools.smali.dexlib2.AccessFlags
 import com.android.tools.smali.dexlib2.Opcode
 import com.android.tools.smali.dexlib2.builder.MutableMethodImplementation
 import com.android.tools.smali.dexlib2.iface.Method
+import com.android.tools.smali.dexlib2.iface.instruction.formats.Instruction35c
 import com.android.tools.smali.dexlib2.iface.reference.FieldReference
+import com.android.tools.smali.dexlib2.iface.reference.MethodReference
 import com.android.tools.smali.dexlib2.iface.reference.TypeReference
 import com.android.tools.smali.dexlib2.immutable.ImmutableMethod
 import com.android.tools.smali.dexlib2.immutable.ImmutableMethodParameter
 
 private const val HOOK = "${Constants.EXT}smb/SmbRoots;"
+private const val ROOT_REFRESH = "${Constants.EXT}smb/SmbRoots\$RootRefresh;"
+private const val BROWSER_ACTIVITY =
+    "Lcom/google/android/apps/nbu/files/advancedbrowsing/browser/AdvancedBrowsingActivity;"
+private const val BUNDLE = "Landroid/os/Bundle;"
 private const val ACTIVITY = "Landroid/app/Activity;"
 private const val CONTEXT = "Landroid/content/Context;"
 private const val URI = "Landroid/net/Uri;"
@@ -60,7 +68,7 @@ val smbStorageRootsPatch = bytecodePatch(
     default = true,
 ) {
     compatibleWith(Constants.COMPATIBILITY_FILES)
-    dependsOn(browserHooksPatch)
+    dependsOn(browserHooksPatch, openStackPatch)
 
     execute {
         val browser = takeBrowserBindings()
@@ -76,6 +84,13 @@ val smbStorageRootsPatch = bytecodePatch(
                 it.code().any { insn -> insn.opcode == Opcode.CHECK_CAST && (insn.ref() as? TypeReference)?.type == LIST } &&
                 it.calls().any { call -> call.parameterTypes == listOf(LIST) && call.returnType == "V" }
         }
+        // Replay the app's exact adapter delivery with the last native catalogue after an SMB change.
+        loader.interfaces.add(ROOT_REFRESH)
+        val refresh = MutableMethod(ImmutableMethod(loader.type, "modKitRefreshSmbRoots",
+            listOf(ImmutableMethodParameter(LIST, emptySet(), null)), "V",
+            AccessFlags.PUBLIC.value or AccessFlags.FINAL.value, emptySet(), emptySet(), MutableMethodImplementation(2)))
+        refresh.addInstructions(0, "invoke-virtual {p0, p1}, $handoff\nreturn-void")
+        loader.methods.add(refresh)
         val loaderPeer = handoff.fields().single { it.definingClass == loader.type }
         val homeView = unique("All storage fragment") {
             it.parameterTypes == listOf("Landroid/view/LayoutInflater;", "Landroid/view/ViewGroup;", "Landroid/os/Bundle;") &&
@@ -98,7 +113,7 @@ val smbStorageRootsPatch = bytecodePatch(
             move-result-object v0
             move-object v1, p1
             check-cast v1, $LIST
-            invoke-static {v1, v0}, $HOOK->append($LIST$ACTIVITY)$LIST
+            invoke-static {v1, v0, p0}, $HOOK->append($LIST$ACTIVITY$ROOT_REFRESH)$LIST
             move-result-object v1
             return-object v1
             move-exception v0
@@ -192,8 +207,68 @@ val smbStorageRootsPatch = bytecodePatch(
             return v0
         """.trimIndent(), ExternalLabel("native", providerCheck.code().first()))
 
+        mutableClassDefBy(rowBinder.definingClass).afterBrowserMethod(mutable(rowBinder), """
+            move-object v1, p2
+            check-cast v1, $rowType
+            iget v2, v1, $rowTag
+            const/4 v3, 0x1
+            if-ne v2, v3, :done
+            iget-object v1, v1, $rowData
+            check-cast v1, $wrapperType
+            iget-object v1, v1, $folderField
+            invoke-static {p1, v1}, $HOOK->bindRootLabel($VIEW$OBJECT)V
+            :done
+        """.trimIndent(), HOOK)
+
         val storage = browser.storage
         val currentFolder = browser.storageFolder
+        val fragment = browser.storageFragment
+        val storageView = fragment.methods.one("SMB toolbar and breadcrumb binder") {
+            it.returnType == VIEW && it.resource("layout/advanced_browsing_browser_fragment_v2") &&
+                it.calls().any { call -> call.name == "setTitle" && call.parameterTypes == listOf("Ljava/lang/CharSequence;") }
+        }
+        fun definition(call: MethodReference): Method? = classDefByOrNull(call.definingClass)?.methods?.singleOrNull {
+            it.name == call.name && it.parameterTypes == call.parameterTypes && it.returnType == call.returnType
+        }
+        val breadcrumb = storageView.calls().distinctBy { it.toString() }.one("native breadcrumb labels") {
+            it.parameterTypes.size == 2 && it.parameterTypes[1] == CONTEXT && it.returnType == LIST &&
+                definition(it)?.calls()?.any { format ->
+                    format.parameterTypes == listOf(STRING) && format.returnType == STRING &&
+                        definition(format)?.string("%1\$s%2\$s") == true
+                } == true
+        }
+        val hut = breadcrumb.parameterTypes[0].toString()
+        val breadcrumbBridge = MutableMethod(ImmutableMethod(fragment.type, "modKitSmbBreadcrumb",
+            listOf(hut, CONTEXT).map { ImmutableMethodParameter(it, emptySet(), null) }, LIST,
+            AccessFlags.PRIVATE.value or AccessFlags.STATIC.value, emptySet(), emptySet(), MutableMethodImplementation(3)))
+        breadcrumbBridge.addInstructions(0, """
+            invoke-static {p0, p1}, $breadcrumb
+            move-result-object v0
+            invoke-static {v0, p0, p1}, $HOOK->fixBreadcrumb($LIST$OBJECT$CONTEXT)$LIST
+            move-result-object v0
+            return-object v0
+        """.trimIndent())
+        fragment.methods.add(breadcrumbBridge)
+        val breadcrumbCall = storageView.code().withIndex().single { it.value.ref()?.toString() == breadcrumb.toString() }
+        val registers = breadcrumbCall.value as Instruction35c
+        check(registers.opcode == Opcode.INVOKE_STATIC && registers.registerCount == 2)
+        storageView.replaceInstruction(breadcrumbCall.index,
+            "invoke-static {v${registers.registerC}, v${registers.registerD}}, $breadcrumbBridge")
+        fragment.afterBrowserMethod(storageView, """
+            invoke-virtual {p0}, ${browser.storagePeer}
+            move-result-object v1
+            iget-object v1, v1, $currentFolder
+            invoke-virtual {p0}, $host
+            move-result-object v2
+            invoke-static {v2, v1}, $HOOK->bindBrowserTitle($ACTIVITY$OBJECT)V
+        """.trimIndent(), HOOK)
+
+        val browserCreate = unique("SMB browser launch arguments") {
+            it.definingClass == BROWSER_ACTIVITY && it.name == "onCreate" &&
+                it.parameterTypes == listOf(BUNDLE) && it.returnType == "V" &&
+                it.resource("layout/advanced_browsing_activity")
+        }.let(::mutable)
+        browserCreate.addInstructions(0, "invoke-static/range {p0 .. p1}, $HOOK->prepareBrowser($ACTIVITY$BUNDLE)V")
         val watchError = unique("native root catalogue observer error") {
             it.parameterTypes == listOf("Ljava/lang/Throwable;") && it.string("Unable to load root containers") &&
                 it.fields().any { field -> field.definingClass == storage.type }

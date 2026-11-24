@@ -36,10 +36,6 @@ public final class SmbConnection {
         return UUID.randomUUID().toString();
     }
 
-    public SmbConnection withDisplayName(String name) {
-        return new SmbConnection(id, name, host, port, share, startPath, user, domain, openWhere, lastPath);
-    }
-
     public SmbConnection withLastPath(String path) {
         return new SmbConnection(id, displayName, host, port, share, startPath, user, domain, openWhere, path);
     }
@@ -75,6 +71,14 @@ public final class SmbConnection {
     /** Who receives the saved password: server, port, user and domain (not the share or folders). */
     public String credentialKey() {
         return host.toLowerCase(java.util.Locale.ROOT) + '\n' + port + '\n' + user + '\n' + domain;
+    }
+
+    /** Compares editable settings, ignoring browser history. */
+    public boolean sameSettings(SmbConnection other) {
+        return other != null && id.equals(other.id) && displayName.equals(other.displayName)
+                && host.equals(other.host) && port == other.port && share.equals(other.share)
+                && startPath.equals(other.startPath) && user.equals(other.user)
+                && domain.equals(other.domain) && openWhere.equals(other.openWhere);
     }
 
     private static String clean(String value) {

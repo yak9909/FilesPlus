@@ -1,5 +1,6 @@
 package app.filesplus.patches.settings
 
+import app.filesplus.patches.browse.afterBrowserMethod
 import app.filesplus.patches.foldertabs.tabSelectionHookPatch
 import app.filesplus.patches.misc.modKitIntegrationPatch
 import app.filesplus.patches.shared.Constants
@@ -35,6 +36,7 @@ private const val VIEW = "Landroid/view/View;"
 private const val DIALOG = "Landroid/app/Dialog;"
 private const val CLICK = "Landroid/content/DialogInterface\$OnClickListener;"
 private const val BRIDGE = "${Constants.EXT}settings/PrefBridge;"
+private const val SMB_SWIPE = "${Constants.EXT}settings/SmbSwipe;"
 private const val PAGES = "${Constants.EXT}settings/SettingsPages;"
 
 private fun Method.code() = implementation?.instructions?.toList().orEmpty()
@@ -384,6 +386,23 @@ val settingsInjectionPatch = bytecodePatch(
                 "Settings: bridge member without implementation: $member"
             }
         }
+
+        val preference = mutableClassDefBy(PREF)
+        val binders = preference.methods.filter { method ->
+            method.returnType == "V" && method.parameterTypes.size == 1 &&
+                method.code().any { (it as? WideLiteralInstruction)?.wideLiteral == 0x01020016L } &&
+                method.calls().any { it.definingClass == VIEW && it.name == "setOnClickListener" }
+        }
+        check(binders.size == 1) { "Settings preference row bind fingerprint: expected 1 match, got ${binders.size}" }
+        val binder = binders.single()
+        println("Settings fingerprint preference row bind: 1 match ($binder)")
+        val itemView = binder.code().mapNotNull { it.ref() as? FieldReference }.distinctBy { it.toString() }.single {
+            it.type == VIEW && isA(binder.parameterTypes.single().toString(), it.definingClass)
+        }
+        preference.afterBrowserMethod(binder, """
+            iget-object v1, p1, $itemView
+            invoke-static {p0, v1}, $SMB_SWIPE->bind($OBJ$VIEW)V
+        """.trimIndent(), PAGES)
 
         val titleCalls = onCreate.code().withIndex().filter { (_, instruction) ->
             (instruction.ref() as? MethodReference)?.let {

@@ -48,30 +48,36 @@ public final class SmbConnectionStore {
      * anything else is stored encrypted. Returns false (and stores nothing) when saving fails, including
      * when the password cannot be encrypted or the stored list is corrupt. May touch the Keystore: call off
      * the main thread. The stored lastPath wins unless host or share changed (then it is reset).
+     * Pass the editor's last saved settings (null for the first save) so a stale edit cannot restore a deleted row.
      */
-    public static boolean save(SmbConnection c, String passwordOrNullToKeep) {
+    public static boolean save(SmbConnection c, String passwordOrNullToKeep, SmbConnection previous) {
         String blob = null;
         if (passwordOrNullToKeep != null && !passwordOrNullToKeep.isEmpty()) {
             // Keystore work stays outside the store lock so readers on the UI thread never wait for it.
             blob = SmbSecretBox.encrypt(passwordOrNullToKeep);
             if (blob == null) return false;
         }
-        return write(c, passwordOrNullToKeep, blob);
+        return write(c, passwordOrNullToKeep, blob, previous);
     }
 
-    private static synchronized boolean write(SmbConnection c, String passwordOrNullToKeep, String blob) {
+    private static synchronized boolean write(SmbConnection c, String passwordOrNullToKeep, String blob,
+            SmbConnection previous) {
         try {
             SharedPreferences prefs = prefs();
             if (prefs == null) return false;
             List<SmbConnection> list = parse(prefs.getString(KEY_LIST, "[]"), true);
             int index = -1;
             for (int i = 0; i < list.size(); i++) if (list.get(i).id.equals(c.id)) index = i;
-            boolean sessionChanged = passwordOrNullToKeep != null;
+            if ((previous == null) != (index < 0)) return false;
+            if (index >= 0 && !previous.sameSettings(list.get(index))) return false;
+            boolean listingChanged = index < 0 || (passwordOrNullToKeep != null
+                    && (!passwordOrNullToKeep.isEmpty() || prefs.contains(PW_PREFIX + c.id)));
             if (index >= 0) {
                 SmbConnection old = list.get(index);
                 // A folder written by the browser since the dialog opened must survive the save.
                 c = c.withLastPath(old.host.equals(c.host) && old.share.equals(c.share) ? old.lastPath : "");
-                sessionChanged |= !old.targetKey().equals(c.targetKey());
+                listingChanged |= !old.targetKey().equals(c.targetKey())
+                        || !old.startPath.equals(c.startPath) || !old.openWhere.equals(c.openWhere);
                 list.set(index, c);
             } else {
                 list.add(c);
@@ -81,9 +87,9 @@ public final class SmbConnectionStore {
             if (blob != null) editor.putString(PW_PREFIX + c.id, blob);
             else if (passwordOrNullToKeep != null) editor.remove(PW_PREFIX + c.id);
             if (!editor.commit()) return false;
-            // A pure rename or folder change keeps the live session.
-            if (sessionChanged) SmbVfs.invalidate(c.id);
+            if (listingChanged) SmbVfs.invalidate(c.id);
             SmbDocumentsProvider.notifyRootsChanged();
+            SmbRoots.connectionChanged(c.id);
             return true;
         } catch (JSONException e) {
             DiagLog.i(AREA, "Saved connections are unreadable; not overwriting them");
@@ -103,6 +109,7 @@ public final class SmbConnectionStore {
             prefs.edit().putString(KEY_LIST, toJson(list)).remove(PW_PREFIX + id).apply();
             SmbVfs.invalidate(id);
             SmbDocumentsProvider.notifyRootsChanged();
+            SmbRoots.connectionChanged(id);
         } catch (JSONException e) {
             DiagLog.i(AREA, "Saved connections are unreadable; not deleting");
         } catch (Throwable t) {
@@ -121,6 +128,17 @@ public final class SmbConnectionStore {
         return SmbSecretBox.decrypt(blob(id)); // Decrypt outside the store lock.
     }
 
+    /** An in-flight query can only load the password for the endpoint and user it started with. */
+    static String passwordFor(SmbConnection expected) {
+        String encrypted;
+        synchronized (SmbConnectionStore.class) {
+            SmbConnection saved = get(expected.id);
+            if (saved == null || !expected.credentialKey().equals(saved.credentialKey())) return null;
+            encrypted = blob(saved.id);
+        }
+        return SmbSecretBox.decrypt(encrypted);
+    }
+
     private static synchronized String blob(String id) {
         SharedPreferences prefs = prefs();
         return prefs == null ? null : prefs.getString(PW_PREFIX + id, null);
@@ -132,16 +150,7 @@ public final class SmbConnectionStore {
     }
 
     /** Remembers the last browsed folder; does not touch sessions or the password. */
-    public static synchronized void setLastPath(String id, String path) {
-        patch(id, false, path);
-    }
-
-    /** Renames a saved connection without touching sessions or the password (async write, safe on the UI thread). */
-    public static synchronized void setDisplayName(String id, String name) {
-        patch(id, true, name);
-    }
-
-    private static void patch(String id, boolean rename, String value) {
+    public static synchronized void setLastPath(SmbConnection expected, String path) {
         try {
             SharedPreferences prefs = prefs();
             if (prefs == null) return;
@@ -149,16 +158,13 @@ public final class SmbConnectionStore {
             boolean changed = false;
             for (int i = 0; i < list.size(); i++) {
                 SmbConnection c = list.get(i);
-                if (!c.id.equals(id)) continue;
-                SmbConnection updated = rename ? c.withDisplayName(value) : c.withLastPath(value);
-                if (updated.displayName.equals(c.displayName) && updated.lastPath.equals(c.lastPath)) continue;
+                if (!c.id.equals(expected.id) || !c.host.equals(expected.host) || !c.share.equals(expected.share)) continue;
+                SmbConnection updated = c.withLastPath(path);
+                if (updated.lastPath.equals(c.lastPath)) continue;
                 list.set(i, updated);
                 changed = true;
             }
-            if (changed) {
-                prefs.edit().putString(KEY_LIST, toJson(list)).apply();
-                if (rename) SmbDocumentsProvider.notifyRootsChanged();
-            }
+            if (changed) prefs.edit().putString(KEY_LIST, toJson(list)).apply();
         } catch (JSONException e) {
             DiagLog.i(AREA, "Saved connections are unreadable; not updating them");
         } catch (Throwable t) {
