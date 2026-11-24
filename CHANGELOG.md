@@ -1,3 +1,9 @@
+## [1.0.0-dev.27](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.26...v1.0.0-dev.27) (2026-11-24)
+
+### 🐛 Bug Fixes
+
+* Record SMB timings and stop idle closes from stalling the share list ([4f44616](https://github.com/yak9909/FilesPlus/commit/4f446162dda029ae3ab94953aa5b328a3bf9fe15))
+
 ## [1.0.0-dev.26](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.25...v1.0.0-dev.26) (2026-11-24)
 
 ### ✨ New Features
