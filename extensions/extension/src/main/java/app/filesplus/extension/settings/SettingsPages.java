@@ -24,6 +24,7 @@ import app.filesplus.extension.DiagLog;
 import app.filesplus.extension.ModKit;
 import app.filesplus.extension.ModSettings;
 import app.filesplus.extension.preview.PreviewHooks;
+import app.filesplus.extension.thumbs.VideoThumbHooks;
 import app.filesplus.extension.browse.Category;
 import app.filesplus.extension.browse.ViewSwitch;
 import app.filesplus.extension.clip.PasteSelfTest;
@@ -142,13 +143,15 @@ public final class SettingsPages {
 
     private static boolean validPage(String page) {
         return "root".equals(page) || "tabs".equals(page) || "skip".equals(page) || "preview".equals(page)
-                || "clipboard".equals(page) || "switch".equals(page) || "smb".equals(page) || "diag".equals(page);
+                || "clipboard".equals(page) || "switch".equals(page) || "smb".equals(page) || "diag".equals(page)
+                || ("thumbs".equals(page) && VideoThumbHooks.installed());
     }
 
     private static boolean hasItems(String id) {
         return "tabs".equals(id) || "skip".equals(id) || "clipboard".equals(id)
                 || ("preview".equals(id) && PreviewHooks.longPressInstalled())
-                || ("switch".equals(id) && ViewSwitch.installed()) || "smb".equals(id) || "diag".equals(id);
+                || ("switch".equals(id) && ViewSwitch.installed()) || "smb".equals(id) || "diag".equals(id)
+                || ("thumbs".equals(id) && VideoThumbHooks.installed());
     }
 
     private String pageTitle() { return titleOf(page); }
@@ -161,6 +164,7 @@ public final class SettingsPages {
             case "clipboard": return tr("クリップボード", "Clipboard");
             case "switch": return tr("表示の切り替え", "View switching");
             case "smb": return "SMB";
+            case "thumbs": return tr("サムネイル", "Thumbnails");
             case "diag": return tr("診断", "Diagnostics");
             default: return tr("FilesPlus の設定", "FilesPlus settings");
         }
@@ -169,7 +173,7 @@ public final class SettingsPages {
     private void populate() {
         switch (page) {
             case "root":
-                for (String id : new String[]{"tabs", "skip", "preview", "clipboard", "switch", "smb", "diag"}) {
+                for (String id : new String[]{"tabs", "skip", "preview", "clipboard", "switch", "smb", "thumbs", "diag"}) {
                     if (hasItems(id)) link(screen, id, titleOf(id));
                 }
                 break;
@@ -200,6 +204,7 @@ public final class SettingsPages {
             case "clipboard": clipboard(); break;
             case "switch": if (ViewSwitch.installed()) viewSwitch(); break;
             case "smb": smb(); break;
+            case "thumbs": thumbnails(); break;
             case "diag": diagnostics(); break;
             default: break;
         }
@@ -426,6 +431,52 @@ public final class SettingsPages {
                 .putExtra(Intent.EXTRA_SUBJECT, title).putExtra(Intent.EXTRA_TEXT, text), tr("共有", "Share")));
     }
 
+    private void thumbnails() {
+        toggle(screen, tr("動画のサムネイルを保存", "Cache video thumbnails"), null,
+                ModSettings.THUMBS_VIDEO_CACHE, true);
+        Object usage = thumbnailUsage();
+        String title = tr("キャッシュの上限", "Cache limit");
+        String[] labels = {"100 MB", "250 MB", "500 MB", "1,000 MB"};
+        List<Integer> limits = List.of(100, 250, 500, 1000);
+        Supplier<Integer> selected = () -> {
+            int index = limits.indexOf(ModSettings.getInt(ModSettings.THUMBS_VIDEO_LIMIT_MB, 500));
+            return index < 0 ? 2 : index;
+        };
+        Object limitRow = row(screen, title, labels[selected.get()], null);
+        bridge.setClick(limitRow, listener(bridge.clickType(), () -> choices(title, labels, selected.get(), which -> {
+            ModSettings.putInt(ModSettings.THUMBS_VIDEO_LIMIT_MB, limits.get(which));
+            bridge.setSummary(limitRow, labels[which]);
+            VideoThumbHooks.applyLimit(japanese, text -> updateThumbnailUsage(usage, text));
+        })));
+        String clear = tr("動画のサムネイルキャッシュを消去", "Clear video thumbnail cache");
+        row(screen, clear, null, () -> {
+            TextView message = new TextView(activity);
+            message.setText(tr("保存した動画のサムネイルをすべて消去しますか？",
+                    "Clear all saved video thumbnails?"));
+            Dialog dialog = bridge.dialog(activity, clear, message, tr("消去", "Clear"), tr("キャンセル", "Cancel"));
+            dialog.show();
+            View positive = dialog.findViewById(android.R.id.button1);
+            if (positive == null) { dialog.dismiss(); throw new IllegalStateException("Clear button missing"); }
+            positive.setOnClickListener(view -> safely(() -> {
+                dialog.dismiss();
+                VideoThumbHooks.clear(japanese, text -> updateThumbnailUsage(usage, text));
+            }));
+        });
+    }
+
+    private Object thumbnailUsage() {
+        Object row = row(screen, tr("動画のサムネイルキャッシュ", "Video thumbnail cache"),
+                tr("使用量を確認中…", "Checking usage…"), null);
+        VideoThumbHooks.usage(japanese, text -> updateThumbnailUsage(row, text));
+        return row;
+    }
+
+    private void updateThumbnailUsage(Object row, String text) {
+        activity.runOnUiThread(() -> safely(() -> {
+            if (!activity.isFinishing() && !activity.isDestroyed()) bridge.setSummary(row, text);
+        }));
+    }
+
     private void diagnostics() {
         String crash = app.filesplus.extension.CrashLog.last();
         if (crash != null) {
@@ -448,6 +499,19 @@ public final class SettingsPages {
         row(screen, tr("圧縮ファイルのフック", "Archives filter hooks"),
                 app.filesplus.extension.browse.ArchiveFilter.installed()
                         ? tr("適用済み", "Installed") : tr("未適用", "Not installed"), null);
+        boolean videoThumbs = VideoThumbHooks.installed();
+        row(screen, tr("動画のサムネイルフック", "Video thumbnail cache hooks"),
+                videoThumbs ? tr("適用済み", "Installed") : tr("未適用", "Not installed"), null);
+        if (videoThumbs) {
+            thumbnailUsage();
+            String title = tr("動画のサムネイルテスト", "Video thumbnail test");
+            row(screen, title, null, () -> {
+                toast(tr("テスト中…", "Testing…"));
+                VideoThumbHooks.selfTest(japanese, text -> activity.runOnUiThread(() -> safely(() -> {
+                    if (!activity.isFinishing() && !activity.isDestroyed()) report(title, text, true);
+                })));
+            });
+        }
         boolean smbRoots = app.filesplus.extension.smb.SmbRoots.installed();
         row(screen, tr("SMB のストレージブラウザフック", "SMB storage browser hooks"),
                 smbRoots ? tr("適用済み", "Installed") : tr("未適用", "Not installed"), null);
