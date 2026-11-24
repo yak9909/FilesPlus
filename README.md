@@ -21,9 +21,9 @@ Click the button below, or manually add this repo url to Morphe Manager: https:/
 ## 🩹 Patches list
 
 <!-- PATCHES_START EXPANDED -->
-> **[v1.0.0-dev.29](https://github.com/yak9909/FilesPlus/releases/tag/v1.0.0-dev.29)**&nbsp;&nbsp;•&nbsp;&nbsp;`dev`&nbsp;&nbsp;•&nbsp;&nbsp;13 patches total
+> **[v1.0.0-dev.30](https://github.com/yak9909/FilesPlus/releases/tag/v1.0.0-dev.30)**&nbsp;&nbsp;•&nbsp;&nbsp;`dev`&nbsp;&nbsp;•&nbsp;&nbsp;14 patches total
 <details open>
-<summary>📦 Files by Google&nbsp;&nbsp;•&nbsp;&nbsp;13 patches</summary>
+<summary>📦 Files by Google&nbsp;&nbsp;•&nbsp;&nbsp;14 patches</summary>
 <br>
 
 **Package name:** `com.google.android.apps.nbu.files`
@@ -46,6 +46,7 @@ Click the button below, or manually add this repo url to Morphe Manager: https:/
 | [Open folder stack](#open-folder-stack) | Lets the storage browser open with a folder stack (volume root down to a folder) so that back and the breadcrumb work. Used by the other features that open the app's own screens. |  |
 | [SMB in storage browser](#smb-in-storage-browser) | Browse saved SMB connections from All storage in the native read-only storage browser. |  |
 | [Show empty folder tabs](#show-empty-folder-tabs) | Remember category folders and optionally append tabs for known folders with no matching files. |  |
+| [Storage grid columns](#storage-grid-columns) | Choose folder and file columns separately in the storage browser's grid. |  |
 | [Switch view](#switch-view) | Switch between the app's storage and media browsers from the top overflow. |  |
 | [Video thumbnail cache](#video-thumbnail-cache) | Keep thumbnails for local videos across cache cleanups. |  |
 

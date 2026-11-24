@@ -1,6 +1,6 @@
 {
   "NOTE": "Do NOT manually edit this file. This file is automatically updated when semantic release (release.yml) runs. Manually editing this file can break your releases and break third party tools that use this file.",
-  "version": "1.0.0-dev.29",
+  "version": "1.0.0-dev.30",
   "patches": [
     {
       "name": "Archives filter",
@@ -294,6 +294,33 @@
     {
       "name": "Show empty folder tabs",
       "description": "Remember category folders and optionally append tabs for known folders with no matching files.",
+      "default": true,
+      "category": null,
+      "compatiblePackages": [
+        {
+          "packageName": "com.google.android.apps.nbu.files",
+          "name": "Files by Google",
+          "description": null,
+          "apkFileType": "APKM",
+          "appIconColor": "#4484F4",
+          "signatures": null,
+          "formFactor": "MOBILE",
+          "targets": [
+            {
+              "version": "1.13157.1011540316.0-release",
+              "versionCodes": null,
+              "isExperimental": false,
+              "minSdk": null,
+              "description": null
+            }
+          ]
+        }
+      ],
+      "options": []
+    },
+    {
+      "name": "Storage grid columns",
+      "description": "Choose folder and file columns separately in the storage browser's grid.",
       "default": true,
       "category": null,
       "compatiblePackages": [
