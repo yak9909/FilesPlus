@@ -35,6 +35,9 @@ public final class ModSettings {
     public static final String SWITCH_ALL_TAB_TARGET = "switch.allTabTarget";
     private static final String SWITCH_LAST_FOLDER = "switch.lastFolder";
 
+    public static final String GRID_STORAGE_FOLDER_COLUMNS = "grid.storage.folderColumns";
+    public static final String GRID_STORAGE_FILE_COLUMNS = "grid.storage.fileColumns";
+
     private ModSettings() {}
 
     public static SharedPreferences prefs() {
