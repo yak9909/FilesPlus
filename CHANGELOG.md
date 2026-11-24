@@ -1,3 +1,9 @@
+## [1.0.0-dev.29](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.28...v1.0.0-dev.29) (2026-11-24)
+
+### ✨ New Features
+
+* Let Back return to the screen you switched from ([c369201](https://github.com/yak9909/FilesPlus/commit/c36920187a71f3ba6f5e630620cab1c8c1814b6f))
+
 ## [1.0.0-dev.28](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.27...v1.0.0-dev.28) (2026-11-24)
 
 ### ✨ New Features
