@@ -4,7 +4,11 @@
 
 **再開したら、作業に入る前に必ず superpowers のスキルを Skill ツールで読み込むこと（ユーザー指示 2026-11-12。「superpowers に従っている感じがしない」との指摘）。** 最低限 `superpowers:using-superpowers` を読み、そのうえで作業に合うものを読み込んで従う（調査・設計のやり直し → `superpowers:brainstorming`／計画書 → `superpowers:writing-plans`／実装の配分 → `superpowers:subagent-driven-development`／レビュー → `superpowers:requesting-code-review`・`superpowers:receiving-code-review`／完了の判断 → `superpowers:verification-before-completion`）。「覚えているから読まなくてよい」とはしない。CLAUDE.md のユーザールールはスキルより優先。
 
-## 進行中（2026-11-24）— まずここ
+## 進行中（2026-11-24 夜）— まずここ
+- **S4a（DESIGN §10.12 の S4 のうちファイルだけ: SD カードとの間のファイルの移動を SHA-256 で検証、元は元のボリュームの自前のゴミ箱へ）を mycodex に送信: t20261124-210459-39**（gpt-6.2-sol/xhigh、指示書 `task-s4a-brief.md`、BASE 3a4964f、ユーザーの許可 2026-11-24 夜）。判断は ledger の Ruling（S4a/S4b に分割、元は自前のゴミ箱、Gradle モジュールは足さない、journal は S5 まで作らない）。返ったら: `task-s4a-verify.ps1` → ART → エミュレーターで内部 ⇔ SD（`/storage/FE1F-1CED`、`sm set-virtual-disk true` で作った仮想の SD）のファイルの貼り付け・プレビューの移動 → Opus レビュー → `feat:` → マージ・push。次は S4b（フォルダ）→ 元アプリのメニューの「コピー」の解禁（小タスク）→ S5 → S6 → Task 10/S7（ゴミ箱）。
+- 注意: S4a のあとも、SD へ移した元は自前のゴミ箱に残るので、内部の空きはゴミ箱の UI と purge（Task 10・S7）まで増えない。
+
+## 進行中（2026-11-24）
 - **Task 7 済み（dev d6c32db feat、merge 73e1834、push 済み）**。直し 2 回目を自分で検証: `task-7-verify.ps1` 通過（dex 53,848）、エミュレーターの ART 検証 `Rejected methods: 0`、TestSMB を押すとトーストのあと元の「There's nothing here.」のまま閉じない、︙ は Select all / Sort by だけ、FAB なし（内部ストレージは FAB・Add new folder・Show as media あり）。Opus 再レビュー承認（Critical・Important なし）。
 - Minor（Task 7）: 削除済みの接続の行でルートの問い合わせが失敗したときにトーストが出ない／`ClipboardPatch.kt` `folderPopupEntry` の `PRIVATE` 判定が `one` の中で毎回評価される（見た目だけ）／`isFolderProto` が全ストレージブラウザで音量一覧の更新ごとに proto を直列化（負荷は小さい）。
 - 実機で見る点（Task 7）: 本物の SMB 共有（空の共有・中身のある共有）を All storage から開く、書き込みの項目が出ないこと、接続を消したあとの行。

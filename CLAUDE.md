@@ -77,6 +77,7 @@ Codex fallback:
 - Delete sessions no longer needed with `codex delete --force <SESSION_ID>`.
 
 ## Notes that must survive /clear
+- **Handoff at every stop (user, 2026-11-24)**: whenever work is finished or you need the user's decision, first update `docs/HANDOFF.md` (and `docs/WORKERS.md`, the ledger) so the session can be cleared with `/clear` safely, then report/ask.
 - Memory files may be lost when the session is cleared, so anything important lives here or in `docs/`.
 - Key analysis findings and hook points are in `docs/DESIGN.md` §2 and per-feature sections.
 - Third-party DocumentsProviders are NOT browsable inside Files (tapping launches the provider's app) → SMB uses its own browser (DESIGN §5.3).
