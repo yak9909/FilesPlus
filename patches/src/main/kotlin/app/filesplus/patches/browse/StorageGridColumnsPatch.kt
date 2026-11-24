@@ -40,6 +40,8 @@ private const val STRING = "Ljava/lang/String;"
 private const val LIST = "Ljava/util/List;"
 private const val RECT = "Landroid/graphics/Rect;"
 private const val VIEW = "Landroid/view/View;"
+private const val FOLDER_CELL = "Lcom/google/android/apps/nbu/files/documentbrowser/commonui/itemviews/RectangularItemView;"
+private const val FOLDER_LABELS = "${Constants.EXT}browse/StorageGridFolderLabels;"
 private const val THROWABLE = "Ljava/lang/Throwable;"
 private const val GET_INTEGER = "Landroid/content/res/Resources;->getInteger(I)I"
 private const val LIST_ADD = "$LIST->add($OBJECT)Z"
@@ -107,11 +109,75 @@ val storageGridColumnsPatch = bytecodePatch(
         val gap = bindPaging(owner, paging, newPlan, page, folderCount, originalCount)
         bindKeyboard(owner, spanResource, gap)
         bindDecoration(nativeSetter)
+        bindFolderLabels(browser.storageFragment, browser.folderType)
 
         mutableClassDefBy(HOOK).methods.single {
             it.name == "installed" && it.parameterTypes.isEmpty() && it.returnType == "Z"
         }.addInstructions(0, "const/4 v0, 0x1\nreturn v0")
     }
+}
+
+private fun BytecodePatchContext.bindFolderLabels(fragment: MutableClass, folderType: String) {
+    val binder = gridFingerprint("native folder grid bind") {
+        it.parameterTypes == listOf(VIEW, OBJECT) && it.returnType == "V" &&
+            it.string("OnGridViewItemClicked") && it.string("OnGridViewItemLongClicked") &&
+            it.code().any { op -> op.opcode == Opcode.CHECK_CAST && op.ref().toString() == FOLDER_CELL } &&
+            it.code().any { op -> op.opcode == Opcode.CHECK_CAST && op.ref().toString() == folderType }
+    }
+    val createStorage = fragment.methods.fingerprint("storage folder binder setup") {
+        it.returnType == VIEW && it.resource("layout/advanced_browsing_browser_fragment_v2") &&
+            it.calls().any { call -> call.returnType == binder.definingClass }
+    } as MutableMethod
+    val code = createStorage.code()
+    val factory = code.indices.single { (code[it].ref() as? MethodReference)?.returnType == binder.definingClass }
+    check(code[factory + 1].opcode == Opcode.MOVE_RESULT_OBJECT)
+    val delegate = (code[factory + 1] as OneRegisterInstruction).registerA
+    createStorage.addInstructions(factory + 2,
+        "invoke-static/range {v$delegate .. v$delegate}, $FOLDER_LABELS->registerBinder($OBJECT)V")
+
+    val binderClass = mutableClassDefBy(binder.definingClass)
+    val image = browserResourceId("id/image_view")
+    val selection = browserResourceId("id/selection_indicator")
+    val title = browserResourceId("id/title")
+    val lock = browserResourceId("id/lock_overlay")
+    binderClass.afterBrowserMethod(binderClass.mutable(binder), """
+        move-object v0, p0
+        move-object v1, p1
+        const v2, $image
+        const v3, $selection
+        const v4, $title
+        const v5, $lock
+        invoke-static/range {v0 .. v5}, $FOLDER_LABELS->bind($OBJECT${VIEW}IIII)V
+    """.trimIndent(), HOOK)
+
+    // Measure the same native cell with its final, decoration-adjusted width spec.
+    val cell = mutableClassDefBy(FOLDER_CELL)
+    val parent = checkNotNull(cell.superclass)
+    check(classDefBy(parent).superclass == "Landroid/widget/RelativeLayout;")
+    check(cell.methods.none { it.name == "onMeasure" && it.parameterTypes == listOf("I", "I") })
+    val measure = MutableMethod(ImmutableMethod(
+        cell.type, "onMeasure", List(2) { ImmutableMethodParameter("I", emptySet(), null) }, "V",
+        AccessFlags.PROTECTED.value, emptySet(), emptySet(), MutableMethodImplementation(4),
+    ))
+    measure.addInstructionsWithLabels(0, """
+        const/4 v0, 0x0
+        invoke-static {p0, p1}, $FOLDER_LABELS->beforeMeasure(${VIEW}I)V
+        :original
+        invoke-super {p0, p1, p2}, $parent->onMeasure(II)V
+        return-void
+        move-exception v0
+        invoke-static {v0}, $HOOK->hookError($THROWABLE)V
+        :resume
+        const/4 v0, 0x0
+        goto :original
+        move-exception v0
+        goto :resume
+    """.trimIndent())
+    measure.implementation!!.apply {
+        addCatch(THROWABLE, newLabelForIndex(1), newLabelForIndex(2), newLabelForIndex(4))
+        addCatch(THROWABLE, newLabelForIndex(5), newLabelForIndex(6), newLabelForIndex(8))
+    }
+    cell.methods.add(measure)
 }
 
 private fun BytecodePatchContext.bindSetup(
