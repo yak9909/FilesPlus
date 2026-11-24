@@ -10,6 +10,9 @@ import android.system.Os;
 import android.system.OsConstants;
 
 import app.filesplus.extension.DiagLog;
+import app.filesplus.extension.ops.Fs;
+import app.filesplus.extension.ops.LocalFs;
+import app.filesplus.extension.ops.VerifiedCopy;
 
 import org.json.JSONObject;
 
@@ -29,9 +32,8 @@ import java.util.Locale;
 import java.util.TimeZone;
 
 /**
- * FilesPlus trash (DESIGN section 10.6): a folder is moved with ONE same-volume rename to
- * {@code <volume root>/.FilesPlus/trash/<opId>/<folder name>}. Nothing is ever deleted here and
- * there is no copy fallback: if the rename fails the folder stays exactly where it was.
+ * FilesPlus trash (DESIGN section 10.6): a file or folder moves with one same-volume rename to
+ * {@code <volume root>/.FilesPlus/trash/<opId>/}. Its manifest records the original and trash paths.
  */
 final class FolderTrash {
     private static final String AREA = "foldertabs";
@@ -66,6 +68,15 @@ final class FolderTrash {
     }
 
     static Result moveToTrash(File folder, File volumeRoot, long fileCount, long totalBytes) throws IOException {
+        return moveToTrash(folder, volumeRoot, fileCount, totalBytes, null, null);
+    }
+
+    static Result moveFileToTrash(File file, File volumeRoot, String opId, Fs.Stat expected) throws IOException {
+        return moveToTrash(file, volumeRoot, 1, expected.size, opId, expected);
+    }
+
+    private static Result moveToTrash(File source, File volumeRoot, long fileCount, long totalBytes,
+                                      String copyOpId, Fs.Stat expected) throws IOException {
         File base = new File(volumeRoot, ".FilesPlus");
         File trash = trashRoot(volumeRoot);
         try {
@@ -87,8 +98,10 @@ final class FolderTrash {
         // Reserve a unique operation folder atomically: createDirectory fails if it already exists.
         File opDir = null;
         String opId = null;
-        for (int attempt = 0; attempt < 20 && opDir == null; attempt++) {
-            String candidate = timestamp("yyyyMMdd-HHmmss") + "-" + String.format(Locale.ROOT, "%06x", RANDOM.nextInt(1 << 24));
+        int attempts = copyOpId == null ? 20 : 1;
+        for (int attempt = 0; attempt < attempts && opDir == null; attempt++) {
+            String candidate = copyOpId != null ? copyOpId
+                    : timestamp("yyyyMMdd-HHmmss") + "-" + String.format(Locale.ROOT, "%06x", RANDOM.nextInt(1 << 24));
             File dir = new File(trash, candidate);
             try {
                 Files.createDirectory(dir.toPath());
@@ -102,24 +115,48 @@ final class FolderTrash {
         }
         if (opDir == null) throw new Failure("Cannot reserve a unique trash folder in " + trash, 0, null);
 
-        File trashed = new File(opDir, folder.getName());
+        String name = source.getName();
+        if (expected != null && ("manifest.json".equalsIgnoreCase(name) || "manifest.json.tmp".equalsIgnoreCase(name))) {
+            name = VerifiedCopy.candidate(name, false, 1);
+        }
+        File trashed = new File(opDir, name);
         File manifest = new File(opDir, "manifest.json");
         File manifestTmp = new File(opDir, "manifest.json.tmp");
         boolean moved = false;
+        LocalFs fs = new LocalFs();
+        Fs.Stat reservation = null;
         try {
-            // Written before the rename so a trashed folder is never left without its origin.
-            writeManifest(manifestTmp, manifest, opId, folder, trashed, fileCount, totalBytes);
-            if (trashed.exists()) throw new Failure("Trash target already exists: " + trashed, 0, null);
+            // Record the original path before renaming the source.
+            writeManifest(manifestTmp, manifest, opId, source, trashed, fileCount, totalBytes, expected == null);
+            if (expected == null) {
+                if (trashed.exists()) throw new Failure("Trash target already exists: " + trashed, 0, null);
+            } else {
+                try (Fs.Writer placeholder = fs.createExclusive(trashed.getPath())) {
+                    reservation = placeholder.stat();
+                }
+                if (!expected.unchanged(fs.lstat(source.getPath()))) throw new Fs.SourceChanged(source.getPath());
+                Fs.Stat current = fs.lstat(trashed.getPath());
+                if (!reservation.sameFile(current) || current.size != 0) {
+                    throw new IOException("Trash reservation changed: " + trashed);
+                }
+            }
             try {
-                // opDir is new and empty, so rename(2) cannot replace anything.
-                Os.rename(folder.getPath(), trashed.getPath());
+                Os.rename(source.getPath(), trashed.getPath());
                 moved = true;
             } catch (ErrnoException e) {
-                throw new Failure("rename failed (" + OsConstants.errnoName(e.errno) + "): " + folder
+                throw new Failure("rename failed (" + OsConstants.errnoName(e.errno) + "): " + source
                         + " -> " + trashed, e.errno, e);
             }
         } finally {
             if (!moved) {
+                if (reservation != null) {
+                    try {
+                        Fs.Stat current = fs.lstat(trashed.getPath());
+                        if (reservation.sameFile(current) && current.size == 0) fs.unlink(trashed.getPath());
+                    } catch (IOException e) {
+                        DiagLog.e(AREA, "Cannot release trash reservation " + trashed, e);
+                    }
+                }
                 // Remove only the empty bookkeeping we created ourselves (no recursion).
                 if (manifestTmp.exists() && !manifestTmp.delete()) DiagLog.e(AREA, "Cannot remove " + manifestTmp, null);
                 if (manifest.exists() && !manifest.delete()) DiagLog.e(AREA, "Cannot remove " + manifest, null);
@@ -133,13 +170,13 @@ final class FolderTrash {
     }
 
     private static void writeManifest(File tmp, File target, String opId, File original, File trashed,
-                                      long fileCount, long totalBytes) throws IOException {
+                                      long fileCount, long totalBytes, boolean directory) throws IOException {
         long now = System.currentTimeMillis();
         try {
             JSONObject json = new JSONObject();
             json.put("version", 1);
             json.put("opId", opId);
-            json.put("kind", "folder");
+            json.put("kind", directory ? "folder" : "file");
             json.put("originalPath", original.getPath());
             json.put("name", original.getName());
             json.put("trashedPath", trashed.getPath());

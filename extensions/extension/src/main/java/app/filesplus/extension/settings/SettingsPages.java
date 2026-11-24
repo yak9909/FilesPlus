@@ -562,6 +562,9 @@ public final class SettingsPages {
                 tr("一時フォルダで、クリップボードと貼り付けの規則を確かめます",
                         "Checks the clipboard and the paste rules in a temporary folder"),
                 this::runPasteTest);
+        String crossVolumeCopy = app.filesplus.extension.foldertabs.TabMove.lastCrossVolumeCopy();
+        row(screen, tr("ボリューム間コピーの結果", "Last cross-volume copy"),
+                crossVolumeCopy == null ? tr("記録なし", "No copy yet") : crossVolumeCopy, null);
         Context app = activity.getApplicationContext();
         List<Clipboard.Interrupted> interrupted = Clipboard.interrupted(app);
         if (!interrupted.isEmpty()) {

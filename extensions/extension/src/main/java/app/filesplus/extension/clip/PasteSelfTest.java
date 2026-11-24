@@ -138,8 +138,15 @@ public final class PasteSelfTest {
                         PasteTarget.ofAllTab(Category.IMAGES, "default", new File(a, "no/such/Pictures"), null, roots)),
                 PasteRules.Reason.NOT_WRITABLE);
         // CROSS_VOLUME
-        r.rule("CROSS_VOLUME: item on volume A, target on volume B",
-                PasteRules.check(state(item(fileA)), folder(otherVolume, roots)), PasteRules.Reason.CROSS_VOLUME);
+        r.rule("OK: file on volume A, target on volume B",
+                PasteRules.check(state(item(fileA)), folder(otherVolume, roots)), null);
+        r.rule("CROSS_VOLUME: folder on volume A, target on volume B",
+                PasteRules.check(state(item(src)), folder(otherVolume, roots)), PasteRules.Reason.CROSS_VOLUME);
+        r.rule("TOO_LARGE: 51 cross-volume files",
+                PasteRules.check(state(many(src, 51, 1)), folder(otherVolume, roots)), PasteRules.Reason.TOO_LARGE);
+        r.rule("TOO_LARGE: cross-volume file above 100MB",
+                PasteRules.check(state(item(new File(src, "big.bin"), PasteRules.MAX_BYTES + 1, false)),
+                        folder(otherVolume, roots)), PasteRules.Reason.TOO_LARGE);
         // TOO_LARGE
         r.rule("TOO_LARGE: 51 items", PasteRules.check(state(many(src, 51, 1)), folder(dst, roots)), PasteRules.Reason.TOO_LARGE);
         r.rule("OK: exactly 50 items", PasteRules.check(state(many(src, 50, 1)), folder(dst, roots)), null);
@@ -324,12 +331,14 @@ public final class PasteSelfTest {
             File sd = roots.get(1);
             PasteRules.Result got = PasteRules.check(state(item(file)), PasteTarget.ofFolder(sd));
             if (!got.ok && got.reason == PasteRules.Reason.NOT_WRITABLE) {
-                r.skip("device: CROSS_VOLUME to the SD card", "the SD card root is not writable: " + sd);
+                r.skip("device: cross-volume paste rules", "the SD card root is not writable: " + sd);
             } else {
-                r.rule("device: CROSS_VOLUME to the SD card (" + sd + ")", got, PasteRules.Reason.CROSS_VOLUME);
+                r.rule("device: file to the SD card (" + sd + ")", got, null);
+                r.rule("device: folder to the SD card (" + sd + ")",
+                        PasteRules.check(state(item(src)), PasteTarget.ofFolder(sd)), PasteRules.Reason.CROSS_VOLUME);
             }
         } else {
-            r.skip("device: CROSS_VOLUME to the SD card", "no SD card or second volume");
+            r.skip("device: cross-volume paste rules", "no SD card or second volume");
         }
     }
 
@@ -433,6 +442,34 @@ public final class PasteSelfTest {
         Clipboard.dismissInterrupted(context);
         r.check("interrupted: dismiss removes records only", Clipboard.interrupted(context).isEmpty()
                 && placeholder.exists() && emptyFolder.isDirectory(), null);
+
+        File part = write(new File(dst, ".filesplus-0123456789abcdef0123456789abcdef-0.part"), "partial");
+        File unrecorded = write(new File(dst, ".filesplus-0123456789abcdef0123456789abcdef-1.part"), "unrelated");
+        File missing = new File(dst, "missing");
+        long pending = Clipboard.beginPaste(context, dst.getPath());
+        long removedFolder = Clipboard.beginPaste(context, missing.getPath());
+        boolean recorded = Clipboard.recordPart(context, pending, part.getPath())
+                && Clipboard.recordPart(context, removedFolder, new File(missing, part.getName()).getPath());
+        Clipboard.endPaste(context, pending);
+        Clipboard.endPaste(context, removedFolder);
+        records = Clipboard.interrupted(context);
+        r.check("interrupted: completed pastes retain parts without another toast", recorded
+                && records.size() == 2 && records.stream().allMatch(record -> record.toasted && record.parts.size() == 1),
+                null);
+        CountDownLatch recovered = new CountDownLatch(1);
+        TabMove.fileExecutor().execute(() -> {
+            try {
+                Clipboard.recoverInterrupted(context);
+            } finally {
+                recovered.countDown();
+            }
+        });
+        awaitCompletion(recovered);
+        records = Clipboard.interrupted(context);
+        r.check("interrupted: cleans recorded part and drops parts under the missing mounted folder",
+                records.size() == 2 && records.stream().allMatch(record -> record.parts.isEmpty())
+                        && !part.exists() && unrecorded.isFile() && placeholder.isFile() && emptyFolder.isDirectory(), null);
+        Clipboard.dismissInterrupted(context);
     }
 
     private static void reservationListener(Report r, Context context, File base) throws Exception {
