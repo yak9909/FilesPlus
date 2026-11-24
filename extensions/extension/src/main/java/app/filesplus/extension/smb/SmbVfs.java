@@ -135,7 +135,8 @@ public final class SmbVfs {
         // A refused IPC$ or srvsvc call surfaces as ShareListException (see SmbSessionPool and SmbShareEnum);
         // a failed logon does not, so the user is not told to type a share name when the password is wrong.
         List<SmbShareEnum.ShareInfo> infos =
-                call(SmbSessionPool.IPC_SHARE, share -> SmbShareEnum.list((PipeShare) share, connection.host));
+                call(SmbSessionPool.IPC_SHARE, share -> SmbShareEnum.list((PipeShare) share, connection.host,
+                        SmbSessionPool.tag(connection.id, SmbSessionPool.IPC_SHARE)));
         List<SmbEntry> out = new ArrayList<>();
         for (SmbShareEnum.ShareInfo info : infos) {
             if (info.isBrowsable()) out.add(new SmbEntry(info.name, true, 0, 0));
@@ -324,17 +325,29 @@ public final class SmbVfs {
     /** Runs one operation, retrying once on a new connection when the old session turned out to be dead. */
     private <T> T call(String shareName, Op<T> op) throws IOException {
         for (int attempt = 0; ; attempt++) {
-            Share share = SmbSessionPool.acquire(connection, shareName, passwordOverride);
+            SmbDiagnostics.Call timing = SmbDiagnostics.begin(attempt == 0 ? "VFS attempt" : "VFS retry");
+            Throwable error = null;
+            boolean retry = false;
+            Share share = null;
             try {
+                timing.target(SmbSessionPool.tag(connection.id, shareName));
+                timing.phase("acquire");
+                share = SmbSessionPool.acquire(connection, shareName, passwordOverride, timing);
+                timing.phase("operation");
                 return op.run(share);
-            } catch (IOException | RuntimeException e) {
-                if (attempt == 0 && SmbErrors.isConnectionBroken(e)) {
-                    SmbSessionPool.invalidate(connection.id, shareName, share);
-                    continue;
-                }
-                throw e;
+            } catch (IOException | RuntimeException | Error e) {
+                error = e;
+                // Acquisition failures still propagate directly, as do unexpected VM errors.
+                retry = share != null && attempt == 0 && !(e instanceof Error) && SmbErrors.isConnectionBroken(e);
+                if (!retry) throw e;
+                timing.phase("invalidate");
+                SmbSessionPool.invalidate(connection.id, shareName, share);
             } finally {
-                SmbSessionPool.release(connection.id, shareName, share);
+                if (share != null) {
+                    timing.phase("release");
+                    SmbSessionPool.release(connection.id, shareName, share);
+                }
+                timing.finish("attempt=" + (attempt + 1) + " retry=" + retry, error);
             }
         }
     }

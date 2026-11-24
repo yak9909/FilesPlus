@@ -92,16 +92,25 @@ public final class SmbShareEnum {
      * server refuses or does not offer the list; other failures are IOExceptions or smbj runtime exceptions.
      */
     public static List<ShareInfo> list(PipeShare ipc, String host) throws IOException {
+        return list(ipc, host, SmbSessionPool.IPC_SHARE);
+    }
+
+    static List<ShareInfo> list(PipeShare ipc, String host, String target) throws IOException {
+        SmbDiagnostics.Call timing = SmbDiagnostics.begin("srvsvc");
+        timing.target(target);
+        Throwable error = null;
+        int count = 0;
         EnumSet<AccessMask> access = EnumSet.of(AccessMask.FILE_READ_DATA, AccessMask.FILE_WRITE_DATA,
                 AccessMask.FILE_APPEND_DATA, AccessMask.FILE_READ_EA, AccessMask.FILE_WRITE_EA,
                 AccessMask.FILE_READ_ATTRIBUTES, AccessMask.FILE_WRITE_ATTRIBUTES, AccessMask.READ_CONTROL,
                 AccessMask.SYNCHRONIZE);
         NamedPipe pipe = null;
         try {
+            timing.phase("open pipe");
             pipe = ipc.open("srvsvc", SMB2ImpersonationLevel.Impersonation, access, null,
                     SMB2ShareAccess.ALL, SMB2CreateDisposition.FILE_OPEN, null);
             final NamedPipe open = pipe;
-            return list(new Pipe() {
+            List<ShareInfo> shares = list(new Pipe() {
                 @Override
                 public byte[] transact(byte[] request) {
                     return open.transact(request);
@@ -111,27 +120,42 @@ public final class SmbShareEnum {
                 public int read(byte[] buffer) {
                     return open.read(buffer);
                 }
-            }, host);
+            }, host, timing);
+            count = shares.size();
+            return shares;
         } catch (RuntimeException e) {
+            error = e;
             // Access denied or a missing srvsvc pipe: the server just does not hand out its share list.
             SmbErrors.ShareListException refused = SmbErrors.asShareListFailure(e);
             if (refused != null) throw refused;
+            throw e;
+        } catch (IOException | Error e) {
+            error = e;
             throw e;
         } finally {
             // A failing close must not turn a finished enumeration into an error.
             if (pipe != null) {
                 try {
+                    timing.phase("close pipe");
                     pipe.close();
-                } catch (Throwable ignored) {
-                    // The pipe handle goes away with the session anyway.
+                } catch (Throwable t) {
+                    if (error == null) error = t;
                 }
             }
+            timing.finish("shares=" + count, error);
         }
     }
 
     static List<ShareInfo> list(Pipe pipe, String host) throws IOException {
+        return list(pipe, host, null);
+    }
+
+    private static List<ShareInfo> list(Pipe pipe, String host, SmbDiagnostics.Call timing) throws IOException {
+        if (timing != null) timing.phase("bind");
         checkBindAck(new PduReader(pipe, pipe.transact(bindPdu(1))).next());
+        if (timing != null) timing.phase("request");
         PduReader reader = new PduReader(pipe, pipe.transact(enumRequestPdu(REQUEST_CALL_ID, "\\\\" + host)));
+        if (timing != null) timing.phase("response reads");
         ByteArrayOutputStream stub = new ByteArrayOutputStream();
         boolean first = true;
         while (true) {
@@ -150,6 +174,7 @@ public final class SmbShareEnum {
             stub.write(pdu, RESPONSE_STUB_OFFSET, pdu.length - RESPONSE_STUB_OFFSET);
             if ((pdu[3] & PFC_LAST_FRAG) != 0) break;
         }
+        if (timing != null) timing.phase("parse");
         return parseEnumStub(stub.toByteArray());
     }
 

@@ -95,8 +95,12 @@ public final class SmbDocumentsProvider extends DocumentsProvider {
 
     @Override
     public Cursor queryDocument(String documentId, String[] projection) throws FileNotFoundException {
+        SmbDiagnostics.Call timing = SmbDiagnostics.begin("queryDocument");
+        Throwable error = null;
+        int rows = 0;
         try {
             SmbDocId id = SmbDocId.decode(documentId);
+            timing.target(SmbDiagnostics.pathTag(id));
             SmbConnection c = connection(id);
             MatrixCursor cursor = new MatrixCursor(projection == null ? DOCUMENT_COLUMNS : projection);
             if (id.isRoot()) {
@@ -106,18 +110,26 @@ public final class SmbDocumentsProvider extends DocumentsProvider {
                 SmbEntry entry = SmbVfs.of(c).stat(id.path);
                 addRow(cursor, SmbDocId.encode(c.id, id.path), entry.name, entry.isDir, entry.size, entry.mtimeMillis);
             }
+            rows = cursor.getCount();
             return cursor;
         } catch (Throwable t) {
-            throw fail("queryDocument", t);
+            error = t;
+            throw fail(t);
+        } finally {
+            timing.finish("rows=" + rows, error);
         }
     }
 
     @Override
     public Cursor queryChildDocuments(String parentDocumentId, String[] projection, String sortOrder)
             throws FileNotFoundException {
+        SmbDiagnostics.Call timing = SmbDiagnostics.begin("queryChildDocuments");
+        Throwable error = null;
+        int rows = 0;
         try {
             requireBackgroundThread();
             SmbDocId parent = SmbDocId.decode(parentDocumentId);
+            timing.target(SmbDiagnostics.pathTag(parent));
             SmbConnection c = connection(parent);
             List<SmbEntry> entries = SmbVfs.of(c).list(parent.path);
             MatrixCursor cursor = new MatrixCursor(projection == null ? DOCUMENT_COLUMNS : projection, entries.size());
@@ -125,16 +137,19 @@ public final class SmbDocumentsProvider extends DocumentsProvider {
                 addRow(cursor, SmbDocId.encode(c.id, SmbPath.join(parent.path, e.name)), e.name,
                         e.isDir, e.size, e.mtimeMillis);
             }
+            rows = cursor.getCount();
             return cursor;
         } catch (Throwable t) {
+            error = t;
             String message = describe(t);
-            DiagLog.i(AREA, "SMB listing failed: " + message);
             MatrixCursor empty = new MatrixCursor(projection == null ? DOCUMENT_COLUMNS : projection, 0);
             Bundle extras = new Bundle();
             extras.putString(DocumentsContract.EXTRA_ERROR, message);
             empty.setExtras(extras);
             if (Binder.getCallingUid() == Process.myUid()) showListError(message);
             return empty;
+        } finally {
+            timing.finish("rows=" + rows, error);
         }
     }
 
@@ -171,28 +186,38 @@ public final class SmbDocumentsProvider extends DocumentsProvider {
     @Override
     public ParcelFileDescriptor openDocument(String documentId, String mode, CancellationSignal signal)
             throws FileNotFoundException {
-        if (!"r".equals(mode)) throw readOnly();
+        SmbDiagnostics.Call timing = SmbDiagnostics.begin("openDocument");
+        Throwable error = null;
+        long size = 0;
         HandlerThread thread = null;
         try {
+            if (!"r".equals(mode)) throw readOnly();
             requireBackgroundThread();
             if (Build.VERSION.SDK_INT < 26) throw new FileNotFoundException("Android 8 or later is required");
             SmbDocId id = SmbDocId.decode(documentId);
+            String pathTag = SmbDiagnostics.pathTag(id);
+            timing.target(pathTag);
             if (id.isRoot()) throw new FileNotFoundException("Not a file");
             SmbConnection c = connection(id);
             SmbEntry entry = SmbVfs.of(c).stat(id.path);
             if (entry.isDir) throw new FileNotFoundException("Not a file");
 
-            thread = new HandlerThread("filesplus-smb-proxy");
+            thread = new ProxyThread();
             thread.start();
             StorageManager storage = getContext().getSystemService(StorageManager.class);
-            ProxyReader reader = new ProxyReader(SmbVfs.of(c), id.path, entry.size, thread);
+            ProxyReader reader = new ProxyReader(SmbVfs.of(c), id.path, pathTag, entry.size, thread);
             ParcelFileDescriptor fd = storage.openProxyFileDescriptor(ParcelFileDescriptor.MODE_READ_ONLY, reader,
                     new Handler(thread.getLooper()));
+            reader.fdOpened();
+            size = entry.size;
             thread = null; // Owned by the reader now; it quits the thread in onRelease.
             return fd;
         } catch (Throwable t) {
+            error = t;
             if (thread != null) thread.quit();
-            throw fail("openDocument", t);
+            throw fail(t);
+        } finally {
+            timing.finish("bytes=" + size, error);
         }
     }
 
@@ -243,12 +268,10 @@ public final class SmbDocumentsProvider extends DocumentsProvider {
         }
     }
 
-    /** Logs and converts any failure to the only exception type the provider may throw. */
-    private static FileNotFoundException fail(String what, Throwable t) {
+    /** Converts any failure to the only exception type the provider may throw. */
+    private static FileNotFoundException fail(Throwable t) {
         if (t instanceof FileNotFoundException) return (FileNotFoundException) t;
-        String message = describe(t);
-        DiagLog.i(AREA, what + " failed: " + message);
-        return new FileNotFoundException(message);
+        return new FileNotFoundException(describe(t));
     }
 
     private static String describe(Throwable t) {
@@ -276,20 +299,52 @@ public final class SmbDocumentsProvider extends DocumentsProvider {
         return "application/octet-stream";
     }
 
+    private static final class ProxyThread extends HandlerThread {
+        ProxyThread() {
+            super("filesplus-smb-proxy");
+        }
+
+        @Override
+        public void run() {
+            SmbDiagnostics.PROXY_THREADS.incrementAndGet();
+            try {
+                super.run();
+            } finally {
+                SmbDiagnostics.PROXY_THREADS.decrementAndGet();
+            }
+        }
+    }
+
     /** Serves reads of one file to the kernel through SmbVfs; runs on its own handler thread. */
     private static final class ProxyReader extends ProxyFileDescriptorCallback {
         private final SmbVfs vfs;
         private final String path;
+        private final String pathTag;
         private final long size;
         private final HandlerThread thread;
         private InputStream stream;
         private long position;
+        private boolean opened;
+        private boolean released;
 
-        ProxyReader(SmbVfs vfs, String path, long size, HandlerThread thread) {
+        ProxyReader(SmbVfs vfs, String path, String pathTag, long size, HandlerThread thread) {
             this.vfs = vfs;
             this.path = path;
+            this.pathTag = pathTag;
             this.size = size;
             this.thread = thread;
+        }
+
+        synchronized void fdOpened() {
+            if (released) return;
+            opened = true;
+            SmbDiagnostics.OPEN_PROXIES.incrementAndGet();
+        }
+
+        private synchronized void fdReleased() {
+            if (released) return;
+            released = true;
+            if (opened) SmbDiagnostics.OPEN_PROXIES.decrementAndGet();
         }
 
         @Override
@@ -299,6 +354,10 @@ public final class SmbDocumentsProvider extends DocumentsProvider {
 
         @Override
         public int onRead(long offset, int length, byte[] data) throws ErrnoException {
+            SmbDiagnostics.Call timing = SmbDiagnostics.begin("proxy onRead");
+            timing.target(pathTag);
+            Throwable error = null;
+            int total = 0;
             try {
                 if (offset >= size) return 0;
                 if (stream == null || offset < position) {
@@ -308,7 +367,6 @@ public final class SmbDocumentsProvider extends DocumentsProvider {
                     stream.skip(offset - position); // SmbVfs streams skip by moving the offset only.
                 }
                 position = offset;
-                int total = 0;
                 int wanted = (int) Math.min(length, size - offset);
                 while (total < wanted) {
                     int count = stream.read(data, total, wanted - total);
@@ -318,16 +376,32 @@ public final class SmbDocumentsProvider extends DocumentsProvider {
                 position += total;
                 return total;
             } catch (Throwable t) {
-                DiagLog.i(AREA, "read failed: " + SmbErrors.describe(t));
+                error = t;
                 closeStream();
                 throw new ErrnoException("onRead", OsConstants.EIO);
+            } finally {
+                timing.finishRead(offset, total, error);
             }
         }
 
         @Override
         public void onRelease() {
-            closeStream();
-            thread.quitSafely();
+            SmbDiagnostics.Call timing = SmbDiagnostics.begin("proxy onRelease");
+            timing.target(pathTag);
+            Throwable error = null;
+            try {
+                fdReleased();
+                closeStream();
+            } catch (Throwable t) {
+                error = t;
+            } finally {
+                try {
+                    thread.quitSafely();
+                } catch (Throwable t) {
+                    if (error == null) error = t;
+                }
+                timing.finish("fd released", error);
+            }
         }
 
         private void closeStream() {

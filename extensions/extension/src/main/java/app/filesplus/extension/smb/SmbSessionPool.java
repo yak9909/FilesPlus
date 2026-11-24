@@ -15,8 +15,11 @@ import com.hierynomus.smbj.share.Share;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -36,222 +39,286 @@ public final class SmbSessionPool {
 
     private static final Object LOCK = new Object();
     private static final Map<String, Entry> ENTRIES = new HashMap<>();
+    private static final Map<Share, Entry> LEASES = new IdentityHashMap<>();
+    private static final Set<Entry> LIVE = new LinkedHashSet<>();
     private static ScheduledExecutorService executor;
 
     private SmbSessionPool() {}
 
-    /** Server resources of one connection id. Fields are guarded by the entry's own monitor. */
+    /**
+     * LOCK guards registration, lease counts and retirement. The entry monitor serializes connection setup.
+     * Once retired, a fully initialized entry is closed by the pool thread after its final lease is released.
+     */
     private static final class Entry {
         final String id;
         final String shareName;
         final String key;
+        final String tag;
+        final long created = SmbDiagnostics.now();
         SMBClient client;
         Connection connection;
         Session session;
         Share share;
         int users;
-        long lastUse;
-        boolean dead;
+        long lastUse = System.currentTimeMillis();
+        boolean connecting;
+        volatile boolean dead;
+        String reason;
 
         Entry(String id, String shareName, String key) {
             this.id = id;
             this.shareName = shareName;
             this.key = key;
+            tag = SmbSessionPool.tag(id, shareName) + " entry=" + Integer.toHexString(System.identityHashCode(this));
         }
 
         boolean alive() {
             return share != null && share.isConnected() && connection != null && connection.isConnected();
         }
-
-        void closeResources() {
-            closeQuietly(share);
-            closeQuietly(session);
-            closeQuietly(connection);
-            closeQuietly(client);
-            share = null;
-            session = null;
-            connection = null;
-            client = null;
-        }
     }
 
-    /**
-     * Returns a connected, authenticated handle for the named share (a {@link DiskShare}, or a {@link PipeShare}
-     * for IPC$), reusing the pooled one when it is alive. A non-null passwordOverride (used by the
-     * unsaved-values test) replaces the saved password.
-     */
+    static String tag(String id, String shareName) {
+        String share = IPC_SHARE.equalsIgnoreCase(shareName) ? IPC_SHARE : "share#" + Integer.toHexString(shareName.hashCode());
+        return SmbDiagnostics.connectionTag(id) + " " + share;
+    }
+
+    /** Returns a leased share. A non-null passwordOverride replaces the saved password. */
     public static Share acquire(SmbConnection c, String shareName, String passwordOverride) throws IOException {
+        return acquire(c, shareName, passwordOverride, null);
+    }
+
+    static Share acquire(SmbConnection c, String shareName, String passwordOverride,
+                         SmbDiagnostics.Call operation) throws IOException {
         if (Looper.myLooper() == Looper.getMainLooper()) {
             throw new IllegalStateException("SMB calls must not run on the main thread");
         }
-        while (true) {
-            Entry entry = entryFor(c, shareName);
-            boolean dead;
-            synchronized (entry) {
-                dead = entry.dead;
-                if (!dead) {
-                    if (!entry.alive()) {
-                        entry.closeResources();
-                        try {
-                            connect(entry, c, passwordOverride);
-                        } catch (IOException | RuntimeException e) {
-                            // Do not keep an unconnected entry around; the next call starts clean.
-                            entry.dead = true;
-                            forget(entry);
-                            throw e;
+        SmbDiagnostics.Call timing = SmbDiagnostics.begin("pool acquire");
+        Throwable error = null;
+        String result = "";
+        try {
+            while (true) {
+                timing.phase("entry lookup");
+                Entry entry = entryFor(c, shareName);
+                timing.target(entry.tag);
+                if (entry.dead) continue;
+                timing.phase("entry monitor wait");
+                synchronized (entry) {
+                    timing.phase("entry check");
+                    synchronized (LOCK) {
+                        if (entry.dead) continue;
+                        if (entry.alive()) {
+                            result = "reused";
+                            return lease(entry, operation, result);
                         }
-                        // Holders of the dead share release with that old share and are ignored (see release),
-                        // so their count must not carry over or this session would never be idle-closed.
-                        entry.users = 0;
+                        if (entry.share != null) {
+                            retire(entry, "disconnected");
+                            continue;
+                        }
+                        entry.connecting = true;
                     }
-                    entry.users++;
-                    entry.lastUse = System.currentTimeMillis();
-                    return entry.share;
+                    Share fresh;
+                    boolean connected = false;
+                    try {
+                        timing.phase("connection setup");
+                        connect(entry, c, passwordOverride);
+                        connected = true;
+                    } finally {
+                        fresh = finishConnect(entry, operation, connected);
+                    }
+                    if (fresh != null) {
+                        result = "fresh";
+                        return fresh;
+                    }
                 }
             }
-            // Closed by the idle sweep or close(); make sure it is gone from the map and take a fresh entry.
-            forget(entry);
+        } catch (IOException | RuntimeException | Error e) {
+            error = e;
+            throw e;
+        } finally {
+            timing.finish(result, error);
         }
+    }
+
+    private static Share finishConnect(Entry entry, SmbDiagnostics.Call operation, boolean connected) {
+        synchronized (LOCK) {
+            if (!connected) retire(entry, "connect failure");
+            entry.connecting = false;
+            if (entry.dead) {
+                scheduleCloseIfUnused(entry);
+                return null;
+            }
+            // Publish the first lease and refresh its idle timestamp before the sweeper can see it.
+            return lease(entry, operation, "fresh");
+        }
+    }
+
+    private static Share lease(Entry entry, SmbDiagnostics.Call operation, String result) {
+        // Keep provenance on a slow operation even when its acquisition was too fast to log separately.
+        if (operation != null) operation.target(entry.tag + " " + result);
+        LEASES.put(entry.share, entry);
+        entry.users++;
+        entry.lastUse = System.currentTimeMillis();
+        return entry.share;
     }
 
     private static String mapKey(String id, String shareName) {
         return id + '\n' + shareName;
     }
 
-    private static void forget(Entry entry) {
-        synchronized (LOCK) {
-            String key = mapKey(entry.id, entry.shareName);
-            if (ENTRIES.get(key) == entry) ENTRIES.remove(key);
-        }
+    /** Called with LOCK held. Active leases survive removal from the reusable entries. */
+    private static void retire(Entry entry, String reason) {
+        if (entry.dead) return;
+        entry.reason = reason;
+        entry.dead = true;
+        ENTRIES.remove(mapKey(entry.id, entry.shareName), entry);
+        scheduleCloseIfUnused(entry);
     }
 
-    /** Pairs with acquire; the share identity makes a late release of a replaced session harmless. */
+    /** Pairs with acquire, even after retirement. A release cannot affect a replacement share. */
     public static void release(String id, String shareName, Share share) {
-        Entry entry;
         synchronized (LOCK) {
-            entry = ENTRIES.get(mapKey(id, shareName));
-        }
-        if (entry == null) return;
-        synchronized (entry) {
-            if (entry.share != share) return;
-            if (entry.users > 0) entry.users--;
+            Entry entry = LEASES.get(share);
+            if (entry == null || !entry.id.equals(id) || !entry.shareName.equals(shareName) || entry.users == 0) return;
+            entry.users--;
             entry.lastUse = System.currentTimeMillis();
+            if (entry.dead) scheduleCloseIfUnused(entry);
         }
     }
 
-    /**
-     * Drops the session only if it is still the one the caller used and found broken; a session another thread
-     * has reconnected since is left alone. Safe on any thread.
-     */
+    /** Drops the session only if it is still the one the caller used and found broken. Safe on any thread. */
     public static void invalidate(String id, String shareName, Share share) {
-        Entry entry;
         synchronized (LOCK) {
-            entry = ENTRIES.get(mapKey(id, shareName));
+            Entry entry = LEASES.get(share);
+            if (entry != null && entry.id.equals(id) && entry.shareName.equals(shareName)) {
+                retire(entry, "invalidated");
+            }
         }
-        if (entry == null) return;
-        synchronized (entry) {
-            if (entry.share != share) return;
-            entry.dead = true; // New callers take a fresh entry; the real close happens off this thread.
-        }
-        forget(entry);
-        closeLater(entry);
     }
 
     /** Drops every session of one connection (settings changed, deleted). Safe on any thread. */
     public static void close(String id) {
-        List<Entry> removed = new ArrayList<>();
         synchronized (LOCK) {
-            for (java.util.Iterator<Entry> it = ENTRIES.values().iterator(); it.hasNext(); ) {
-                Entry entry = it.next();
-                if (entry.id.equals(id)) {
-                    it.remove();
-                    removed.add(entry);
-                }
+            for (Entry entry : new ArrayList<>(ENTRIES.values())) {
+                if (entry.id.equals(id)) retire(entry, "settings");
             }
         }
-        for (Entry entry : removed) closeLater(entry);
     }
 
     public static void closeAll() {
-        List<Entry> all;
         synchronized (LOCK) {
-            all = new ArrayList<>(ENTRIES.values());
-            ENTRIES.clear();
+            for (Entry entry : new ArrayList<>(ENTRIES.values())) retire(entry, "closeAll");
         }
-        for (Entry entry : all) closeLater(entry);
     }
 
-    /** Entry for the connection and share; an entry for different server settings is replaced. */
     private static Entry entryFor(SmbConnection c, String shareName) {
-        Entry old = null;
-        Entry entry;
         String mapKey = mapKey(c.id, shareName);
+        String target = c.targetKey();
         synchronized (LOCK) {
-            entry = ENTRIES.get(mapKey);
-            if (entry != null && !entry.key.equals(c.targetKey())) {
-                old = entry;
+            ensureSweeper();
+            Entry entry = ENTRIES.get(mapKey);
+            if (entry != null && !entry.key.equals(target)) {
+                retire(entry, "settings replaced");
                 entry = null;
             }
             if (entry == null) {
-                entry = new Entry(c.id, shareName, c.targetKey());
+                entry = new Entry(c.id, shareName, target);
                 ENTRIES.put(mapKey, entry);
+                LIVE.add(entry);
             }
-            ensureSweeper();
+            return entry;
         }
-        if (old != null) closeLater(old);
-        return entry;
+    }
+
+    static List<String> diagnosticEntries() {
+        synchronized (LOCK) {
+            long now = SmbDiagnostics.now();
+            long wallNow = System.currentTimeMillis();
+            List<String> entries = new ArrayList<>(LIVE.size());
+            for (Entry entry : LIVE) {
+                entries.add(entry.tag + " users=" + entry.users + " dead=" + entry.dead
+                        + " age=" + (now - entry.created) + "ms idle=" + (wallNow - entry.lastUse) + "ms"
+                        + (entry.connecting ? " connecting" : "") + (entry.dead ? " " + entry.reason : ""));
+            }
+            return entries;
+        }
     }
 
     private static void connect(Entry entry, SmbConnection c, String passwordOverride) throws IOException {
-        AuthenticationContext auth;
-        if (c.user.isEmpty()) {
-            auth = AuthenticationContext.guest();
-        } else {
-            String password = passwordOverride != null ? passwordOverride : SmbConnectionStore.password(c.id);
-            // Never try an empty password for a lost one: repeated failed logons can lock the account.
-            if (password == null) throw new SmbErrors.PasswordMissingException();
-            auth = new AuthenticationContext(c.user, password.toCharArray(), c.domain);
-        }
+        SmbDiagnostics.Call timing = SmbDiagnostics.begin("pool connect");
+        timing.target(entry.tag);
+        Throwable error = null;
+        String dialect = "";
         try {
+            timing.phase("credentials and setup");
+            AuthenticationContext auth;
+            if (c.user.isEmpty()) {
+                auth = AuthenticationContext.guest();
+            } else {
+                String password = passwordOverride != null ? passwordOverride : SmbConnectionStore.password(c.id);
+                // Never try an empty password for a lost one: repeated failed logons can lock the account.
+                if (password == null) throw new SmbErrors.PasswordMissingException();
+                auth = new AuthenticationContext(c.user, password.toCharArray(), c.domain);
+            }
             entry.client = SmbClientFactory.create();
-            entry.connection = entry.client.connect(c.host, c.port);
+            entry.connection = SmbClientFactory.connect(entry.client, c.host, c.port, timing);
+            timing.phase("authenticate");
             entry.session = entry.connection.authenticate(auth);
-            String dialect = String.valueOf(entry.connection.getNegotiatedProtocol().getDialect());
-            Share share;
+            dialect = String.valueOf(entry.connection.getNegotiatedProtocol().getDialect());
+            timing.phase("tree connect");
             try {
-                share = entry.session.connectShare(entry.shareName);
+                entry.share = entry.session.connectShare(entry.shareName);
             } catch (RuntimeException e) {
-                // A server that refuses IPC$ cannot list its shares; a failed logon was reported above instead.
                 SmbErrors.ShareListException refused =
                         IPC_SHARE.equalsIgnoreCase(entry.shareName) ? SmbErrors.asShareListFailure(e) : null;
                 if (refused != null) throw refused;
                 throw e;
             }
-            boolean pipe = share instanceof PipeShare && IPC_SHARE.equalsIgnoreCase(entry.shareName);
-            if (!(share instanceof DiskShare) && !pipe) {
-                closeQuietly(share);
+            boolean pipe = entry.share instanceof PipeShare && IPC_SHARE.equalsIgnoreCase(entry.shareName);
+            if (!(entry.share instanceof DiskShare) && !pipe) {
                 throw new IOException("'" + entry.shareName + "' is not a disk share");
             }
-            entry.share = share;
-            DiagLog.i(AREA, "Connected (" + dialect + ")");
-        } catch (IOException | RuntimeException e) {
-            entry.closeResources();
+        } catch (IOException | RuntimeException | Error e) {
+            error = e;
             throw e;
+        } finally {
+            timing.finish(dialect, error);
         }
     }
 
-    private static void closeLater(Entry entry) {
-        synchronized (LOCK) {
-            ensureSweeper();
-            executor.execute(() -> closeEntry(entry));
-        }
+    /** Called only on retirement, connection completion, or a lease release, with LOCK held. */
+    private static void scheduleCloseIfUnused(Entry entry) {
+        if (entry.connecting || entry.users != 0) return;
+        LEASES.remove(entry.share);
+        executor.execute(() -> closeEntry(entry));
     }
 
     private static void closeEntry(Entry entry) {
-        synchronized (entry) {
-            entry.dead = true;
-            entry.closeResources();
+        SmbDiagnostics.Call timing = SmbDiagnostics.begin("pool close");
+        timing.target(entry.tag + " " + entry.reason);
+        Throwable error = null;
+        try {
+            error = closeResource(entry.share, "tree disconnect", timing, error);
+            error = closeResource(entry.session, "logoff", timing, error);
+            error = closeResource(entry.connection, "connection close", timing, error);
+            error = closeResource(entry.client, "client close", timing, error);
+        } finally {
+            synchronized (LOCK) {
+                LIVE.remove(entry);
+            }
+            timing.finish("released", error);
         }
+    }
+
+    private static Throwable closeResource(AutoCloseable resource, String phase, SmbDiagnostics.Call timing,
+                                           Throwable firstError) {
+        if (resource == null) return firstError;
+        timing.phase(phase);
+        try {
+            resource.close();
+        } catch (Throwable t) {
+            if (firstError == null) return t;
+        }
+        return firstError;
     }
 
     private static void ensureSweeper() {
@@ -264,36 +331,19 @@ public final class SmbSessionPool {
         executor.scheduleWithFixedDelay(SmbSessionPool::sweep, SWEEP_SEC, SWEEP_SEC, TimeUnit.SECONDS);
     }
 
-    /** Closes sessions that nobody uses and that have been idle for IDLE_MS. */
+    /** Retires unused sessions after IDLE_MS and lets the pool executor close them. */
     private static void sweep() {
         try {
-            List<Entry> snapshot;
             synchronized (LOCK) {
-                snapshot = new ArrayList<>(ENTRIES.values());
-            }
-            long now = System.currentTimeMillis();
-            for (Entry entry : snapshot) {
-                boolean idle;
-                synchronized (entry) {
-                    idle = !entry.dead && entry.users == 0 && entry.share != null && now - entry.lastUse >= IDLE_MS;
-                    if (idle) {
-                        entry.dead = true;
-                        entry.closeResources();
+                long now = System.currentTimeMillis();
+                for (Entry entry : new ArrayList<>(ENTRIES.values())) {
+                    if (!entry.connecting && entry.users == 0 && entry.share != null && now - entry.lastUse >= IDLE_MS) {
+                        retire(entry, "idle");
                     }
                 }
-                if (idle) forget(entry);
             }
         } catch (Throwable t) {
             DiagLog.e(AREA, "Idle sweep failed", t);
-        }
-    }
-
-    private static void closeQuietly(AutoCloseable closeable) {
-        if (closeable == null) return;
-        try {
-            closeable.close();
-        } catch (Throwable ignored) {
-            // The connection is being dropped anyway.
         }
     }
 }
