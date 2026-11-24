@@ -1,3 +1,9 @@
+## [1.0.0-dev.26](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.25...v1.0.0-dev.26) (2026-11-24)
+
+### ✨ New Features
+
+* Keep generated video thumbnails and reuse them ([53b0e82](https://github.com/yak9909/FilesPlus/commit/53b0e82983e0ab0e69ce36d96c349558207bedbd))
+
 ## [1.0.0-dev.25](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.24...v1.0.0-dev.25) (2026-11-23)
 
 ### ✨ New Features
