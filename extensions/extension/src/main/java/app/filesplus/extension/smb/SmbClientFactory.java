@@ -6,6 +6,7 @@ import com.hierynomus.security.bc.BCSecurityProvider;
 import com.hierynomus.smbj.SMBClient;
 import com.hierynomus.smbj.SmbConfig;
 import com.hierynomus.smbj.auth.NtlmAuthenticator;
+import com.hierynomus.smbj.connection.Connection;
 
 import java.io.IOException;
 import java.net.InetAddress;
@@ -22,6 +23,9 @@ public final class SmbClientFactory {
     private static final long READ_TIMEOUT_SEC = 30;
     // Lightweight BouncyCastle API (no JCA provider lookup), so it cannot clash with Android's own "BC".
     private static final SecurityProvider SECURITY = new BCSecurityProvider();
+
+    // smbj opens the direct TCP socket on the connection caller's thread.
+    private static final ThreadLocal<SmbDiagnostics.Call> CONNECT_TIMING = new ThreadLocal<>();
 
     private SmbClientFactory() {}
 
@@ -40,6 +44,16 @@ public final class SmbClientFactory {
         return new SMBClient(config);
     }
 
+    static Connection connect(SMBClient client, String host, int port, SmbDiagnostics.Call timing) throws IOException {
+        CONNECT_TIMING.set(timing);
+        try {
+            timing.phase("connection initialization");
+            return client.connect(host, port);
+        } finally {
+            CONNECT_TIMING.remove();
+        }
+    }
+
     /** smbj connects through createSocket(host, port) with no connect timeout; add one here. */
     private static final class TimeoutSocketFactory extends SocketFactory {
         @Override
@@ -51,7 +65,12 @@ public final class SmbClientFactory {
         public Socket createSocket(String host, int port) throws IOException {
             Socket socket = new Socket();
             try {
-                socket.connect(new InetSocketAddress(host, port), CONNECT_TIMEOUT_MS);
+                SmbDiagnostics.Call timing = CONNECT_TIMING.get();
+                if (timing != null) timing.phase("resolve");
+                InetSocketAddress address = new InetSocketAddress(host, port);
+                if (timing != null) timing.phase("TCP connect");
+                socket.connect(address, CONNECT_TIMEOUT_MS);
+                if (timing != null) timing.phase("negotiate");
             } catch (IOException | RuntimeException e) {
                 try {
                     socket.close();

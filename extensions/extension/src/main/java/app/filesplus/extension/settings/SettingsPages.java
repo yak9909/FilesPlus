@@ -569,6 +569,12 @@ public final class SettingsPages {
         row(screen, tr("ログ", "Log"), tr("タップで表示（新しい順）", "Tap to show (newest first)"),
                 () -> report(tr("診断ログ", "Diagnostic log"), logReport(), true));
         row(screen, tr("ログをコピー", "Copy log"), null, () -> copy("Diagnostic log", logReport()));
+        Object smb = category("SMB");
+        bridge.addTo(screen, smb);
+        row(smb, tr("現在の SMB の状態", "Live SMB activity"), null, () ->
+                report("SMB", SmbDiagnostics.liveReport(), true));
+        String copyThreads = tr("スレッドの状態をコピー", "Copy thread dump");
+        row(smb, copyThreads, null, () -> copy(copyThreads, SmbDiagnostics.threadReport()));
         new Thread(() -> {
             String result;
             try { result = decoderReport(); }
