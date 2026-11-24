@@ -1,3 +1,9 @@
+## [1.0.0-dev.31](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.30...v1.0.0-dev.31) (2026-11-24)
+
+### ✨ New Features
+
+* Show folder names under the icon in narrow grid columns ([3a4964f](https://github.com/yak9909/FilesPlus/commit/3a4964fbbed74bcec36e6867404fe4c38526d808))
+
 ## [1.0.0-dev.30](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.29...v1.0.0-dev.30) (2026-11-24)
 
 ### ✨ New Features
