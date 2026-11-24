@@ -1,4 +1,4 @@
-rootProject.name = "moddedfiles-patches"
+rootProject.name = "filesplus-patches"
 
 pluginManagement {
     repositories {

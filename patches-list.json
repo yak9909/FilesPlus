@@ -1,5 +1,403 @@
 {
   "NOTE": "Do NOT manually edit this file. This file is automatically updated when semantic release (release.yml) runs. Manually editing this file can break your releases and break third party tools that use this file.",
-  "version": "0.0.0",
-  "patches": []
+  "version": "1.0.0-dev.34",
+  "patches": [
+    {
+      "name": "Archives filter",
+      "description": "Add a native Archives filter chip to the Downloads tabs.",
+      "default": true,
+      "category": null,
+      "compatiblePackages": [
+        {
+          "packageName": "com.google.android.apps.nbu.files",
+          "name": "Files by Google",
+          "description": null,
+          "apkFileType": "APKM",
+          "appIconColor": "#4484F4",
+          "signatures": null,
+          "formFactor": "MOBILE",
+          "targets": [
+            {
+              "version": "1.13157.1011540316.0-release",
+              "versionCodes": null,
+              "isExperimental": false,
+              "minSdk": null,
+              "description": null
+            }
+          ]
+        }
+      ],
+      "options": []
+    },
+    {
+      "name": "Change package name",
+      "description": "Install Files alongside the system app with a different package name and label.",
+      "default": true,
+      "category": null,
+      "compatiblePackages": [
+        {
+          "packageName": "com.google.android.apps.nbu.files",
+          "name": "Files by Google",
+          "description": null,
+          "apkFileType": "APKM",
+          "appIconColor": "#4484F4",
+          "signatures": null,
+          "formFactor": "MOBILE",
+          "targets": [
+            {
+              "version": "1.13157.1011540316.0-release",
+              "versionCodes": null,
+              "isExperimental": false,
+              "minSdk": null,
+              "description": null
+            }
+          ]
+        }
+      ],
+      "options": [
+        {
+          "key": "packageName",
+          "title": "Package name",
+          "description": "A unique Android package name for the patched app.",
+          "required": true,
+          "type": "kotlin.String",
+          "default": "com.google.android.apps.nbu.files.mod",
+          "values": null
+        },
+        {
+          "key": "appLabel",
+          "title": "App label",
+          "description": "The application and launcher name in every language.",
+          "required": true,
+          "type": "kotlin.String",
+          "default": "FilesPlus",
+          "values": null
+        }
+      ]
+    },
+    {
+      "name": "Clipboard",
+      "description": "Cut and paste files from the app's browsers and preview.",
+      "default": true,
+      "category": null,
+      "compatiblePackages": [
+        {
+          "packageName": "com.google.android.apps.nbu.files",
+          "name": "Files by Google",
+          "description": null,
+          "apkFileType": "APKM",
+          "appIconColor": "#4484F4",
+          "signatures": null,
+          "formFactor": "MOBILE",
+          "targets": [
+            {
+              "version": "1.13157.1011540316.0-release",
+              "versionCodes": null,
+              "isExperimental": false,
+              "minSdk": null,
+              "description": null
+            }
+          ]
+        }
+      ],
+      "options": []
+    },
+    {
+      "name": "Custom skip duration",
+      "description": "Customize double-tap and button skip durations; long-press a skip button to change its duration. Optionally, a double-tap rewind near the start goes to the start.",
+      "default": true,
+      "category": null,
+      "compatiblePackages": [
+        {
+          "packageName": "com.google.android.apps.nbu.files",
+          "name": "Files by Google",
+          "description": null,
+          "apkFileType": "APKM",
+          "appIconColor": "#4484F4",
+          "signatures": null,
+          "formFactor": "MOBILE",
+          "targets": [
+            {
+              "version": "1.13157.1011540316.0-release",
+              "versionCodes": null,
+              "isExperimental": false,
+              "minSdk": null,
+              "description": null
+            }
+          ]
+        }
+      ],
+      "options": []
+    },
+    {
+      "name": "Delete folder from tabs",
+      "description": "Move the current folder to the FilesPlus trash (kept 30 days) from category tabs, with confirmation and protected folders.",
+      "default": true,
+      "category": null,
+      "compatiblePackages": [
+        {
+          "packageName": "com.google.android.apps.nbu.files",
+          "name": "Files by Google",
+          "description": null,
+          "apkFileType": "APKM",
+          "appIconColor": "#4484F4",
+          "signatures": null,
+          "formFactor": "MOBILE",
+          "targets": [
+            {
+              "version": "1.13157.1011540316.0-release",
+              "versionCodes": null,
+              "isExperimental": false,
+              "minSdk": null,
+              "description": null
+            }
+          ]
+        }
+      ],
+      "options": []
+    },
+    {
+      "name": "FilesPlus settings",
+      "description": "Put FilesPlus settings and diagnostics in the app's original settings screens.",
+      "default": true,
+      "category": null,
+      "compatiblePackages": [
+        {
+          "packageName": "com.google.android.apps.nbu.files",
+          "name": "Files by Google",
+          "description": null,
+          "apkFileType": "APKM",
+          "appIconColor": "#4484F4",
+          "signatures": null,
+          "formFactor": "MOBILE",
+          "targets": [
+            {
+              "version": "1.13157.1011540316.0-release",
+              "versionCodes": null,
+              "isExperimental": false,
+              "minSdk": null,
+              "description": null
+            }
+          ]
+        }
+      ],
+      "options": []
+    },
+    {
+      "name": "High-resolution playback",
+      "description": "Try videos beyond reported decoder limits, enable decoder fallback, and log playback diagnostics.",
+      "default": true,
+      "category": null,
+      "compatiblePackages": [
+        {
+          "packageName": "com.google.android.apps.nbu.files",
+          "name": "Files by Google",
+          "description": null,
+          "apkFileType": "APKM",
+          "appIconColor": "#4484F4",
+          "signatures": null,
+          "formFactor": "MOBILE",
+          "targets": [
+            {
+              "version": "1.13157.1011540316.0-release",
+              "versionCodes": null,
+              "isExperimental": false,
+              "minSdk": null,
+              "description": null
+            }
+          ]
+        }
+      ],
+      "options": []
+    },
+    {
+      "name": "Multi-select in preview",
+      "description": "Add Select / Deselect items to the preview screen's menu to collect files while previewing, and select them in the list when you go back.",
+      "default": true,
+      "category": null,
+      "compatiblePackages": [
+        {
+          "packageName": "com.google.android.apps.nbu.files",
+          "name": "Files by Google",
+          "description": null,
+          "apkFileType": "APKM",
+          "appIconColor": "#4484F4",
+          "signatures": null,
+          "formFactor": "MOBILE",
+          "targets": [
+            {
+              "version": "1.13157.1011540316.0-release",
+              "versionCodes": null,
+              "isExperimental": false,
+              "minSdk": null,
+              "description": null
+            }
+          ]
+        }
+      ],
+      "options": []
+    },
+    {
+      "name": "Open folder stack",
+      "description": "Lets the storage browser open with a folder stack (volume root down to a folder) so that back and the breadcrumb work. Used by the other features that open the app's own screens.",
+      "default": true,
+      "category": null,
+      "compatiblePackages": [
+        {
+          "packageName": "com.google.android.apps.nbu.files",
+          "name": "Files by Google",
+          "description": null,
+          "apkFileType": "APKM",
+          "appIconColor": "#4484F4",
+          "signatures": null,
+          "formFactor": "MOBILE",
+          "targets": [
+            {
+              "version": "1.13157.1011540316.0-release",
+              "versionCodes": null,
+              "isExperimental": false,
+              "minSdk": null,
+              "description": null
+            }
+          ]
+        }
+      ],
+      "options": []
+    },
+    {
+      "name": "SMB in storage browser",
+      "description": "Browse saved SMB connections from All storage in the native read-only storage browser.",
+      "default": true,
+      "category": null,
+      "compatiblePackages": [
+        {
+          "packageName": "com.google.android.apps.nbu.files",
+          "name": "Files by Google",
+          "description": null,
+          "apkFileType": "APKM",
+          "appIconColor": "#4484F4",
+          "signatures": null,
+          "formFactor": "MOBILE",
+          "targets": [
+            {
+              "version": "1.13157.1011540316.0-release",
+              "versionCodes": null,
+              "isExperimental": false,
+              "minSdk": null,
+              "description": null
+            }
+          ]
+        }
+      ],
+      "options": []
+    },
+    {
+      "name": "Show empty folder tabs",
+      "description": "Remember category folders and optionally append tabs for known folders with no matching files.",
+      "default": true,
+      "category": null,
+      "compatiblePackages": [
+        {
+          "packageName": "com.google.android.apps.nbu.files",
+          "name": "Files by Google",
+          "description": null,
+          "apkFileType": "APKM",
+          "appIconColor": "#4484F4",
+          "signatures": null,
+          "formFactor": "MOBILE",
+          "targets": [
+            {
+              "version": "1.13157.1011540316.0-release",
+              "versionCodes": null,
+              "isExperimental": false,
+              "minSdk": null,
+              "description": null
+            }
+          ]
+        }
+      ],
+      "options": []
+    },
+    {
+      "name": "Storage grid columns",
+      "description": "Choose folder and file columns separately in the storage browser's grid.",
+      "default": true,
+      "category": null,
+      "compatiblePackages": [
+        {
+          "packageName": "com.google.android.apps.nbu.files",
+          "name": "Files by Google",
+          "description": null,
+          "apkFileType": "APKM",
+          "appIconColor": "#4484F4",
+          "signatures": null,
+          "formFactor": "MOBILE",
+          "targets": [
+            {
+              "version": "1.13157.1011540316.0-release",
+              "versionCodes": null,
+              "isExperimental": false,
+              "minSdk": null,
+              "description": null
+            }
+          ]
+        }
+      ],
+      "options": []
+    },
+    {
+      "name": "Switch view",
+      "description": "Switch between the app's storage and media browsers from the top overflow.",
+      "default": true,
+      "category": null,
+      "compatiblePackages": [
+        {
+          "packageName": "com.google.android.apps.nbu.files",
+          "name": "Files by Google",
+          "description": null,
+          "apkFileType": "APKM",
+          "appIconColor": "#4484F4",
+          "signatures": null,
+          "formFactor": "MOBILE",
+          "targets": [
+            {
+              "version": "1.13157.1011540316.0-release",
+              "versionCodes": null,
+              "isExperimental": false,
+              "minSdk": null,
+              "description": null
+            }
+          ]
+        }
+      ],
+      "options": []
+    },
+    {
+      "name": "Video thumbnail cache",
+      "description": "Keep thumbnails for local videos across cache cleanups.",
+      "default": true,
+      "category": null,
+      "compatiblePackages": [
+        {
+          "packageName": "com.google.android.apps.nbu.files",
+          "name": "Files by Google",
+          "description": null,
+          "apkFileType": "APKM",
+          "appIconColor": "#4484F4",
+          "signatures": null,
+          "formFactor": "MOBILE",
+          "targets": [
+            {
+              "version": "1.13157.1011540316.0-release",
+              "versionCodes": null,
+              "isExperimental": false,
+              "minSdk": null,
+              "description": null
+            }
+          ]
+        }
+      ],
+      "options": []
+    }
+  ]
 }

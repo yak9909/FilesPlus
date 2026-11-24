@@ -1,7 +1,7 @@
 # パッチの作り方と当て方（Morphe 方式）
 
 - 作成日: 2026-11-11（改訂 0.2: Morphe 方式に変更 / 0.3: GitHub リポジトリと署名鍵の手順を追加）
-- リポジトリ: https://github.com/yak9909/ModdedFiles （公開。`main`＝安定版、`dev`＝開発版）
+- リポジトリ: https://github.com/yak9909/FilesPlus （公開。`main`＝安定版、`dev`＝開発版）
 - 前提となるユーザー環境: **root なし、adb はなるべく使わない、Morphe Manager は導入済み**、Files は**システムアプリ**として入っている
 - 個人で使うためのもの。パッチを当てた APK は配布しない（パッチ定義そのものには Google のコードを含めない）
 
@@ -12,7 +12,7 @@
 **Morphe のパッチバンドル（`.mpp`）として作り、端末の Morphe Manager で当てる。**
 
 ```
-［PC］ModdedFiles リポジトリ ──./gradlew buildAndroid──▶ patches-x.y.z.mpp
+［PC］FilesPlus リポジトリ ──./gradlew buildAndroid──▶ patches-x.y.z.mpp
                                                          │（Google ドライブ / USB のファイル転送 / GitHub Releases）
 ［端末］Morphe Manager ─ パッチソースに .mpp を追加 ─ Files の APKM を選ぶ ─ パッチ ─ インストール
 ```
@@ -53,10 +53,10 @@ gpr.key = ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxx
 公式の **MorpheApp/morphe-patches-template** をもとに作る。
 
 ```
-ModdedFiles/
+FilesPlus/
 ├─ patches/                                   ← パッチ定義（Kotlin）
 │  ├─ build.gradle.kts                        （group と About を設定）
-│  └─ src/main/kotlin/app/moddedfiles/patches/files/
+│  └─ src/main/kotlin/app/filesplus/patches/files/
 │     ├─ shared/Compatibility.kt             （対象パッケージとバージョン）
 │     ├─ shared/Fingerprints.kt              （フック位置の探し方。旧 hooks/*.yaml の代わり）
 │     ├─ misc/ModKitIntegrationPatch.kt      （extension の初期化、設定画面の入口）
@@ -70,7 +70,7 @@ ModdedFiles/
 │     ├─ media/GifSeekPatch.kt
 │     └─ storage/SmbProviderPatch.kt
 ├─ extensions/extension/                      ← ModKit 本体（Java/Kotlin。dex になってアプリに合流する）
-│  └─ src/main/java/app/moddedfiles/modkit/…   （DESIGN.md §4〜§6 の Core と Hook 入口）
+│  └─ src/main/java/app/filesplus/modkit/…   （DESIGN.md §4〜§6 の Core と Hook 入口）
 ├─ stubs/                                     ← 難読化クラスのスタブ（compileOnly）
 ├─ docs/
 └─ original/                                  ← 元の APKM（git には入れない）
@@ -130,16 +130,16 @@ object QuickSeekFingerprint : Fingerprint(
 
 ### 3.3 extension（ModKit 本体）
 - `extensions/extension` の Java/Kotlin コードがビルド時に dex（`.mpe`）になり、`.mpp` の中に入る。パッチを当てるときにアプリの dex へ合流する。
-- パッチ側の smali の変更は「`invoke-static {…}, Lapp/moddedfiles/modkit/Hooks;->xxx(…)`」を差し込むだけにして、処理はすべて extension に書く（DESIGN.md の P2）。
+- パッチ側の smali の変更は「`invoke-static {…}, Lapp/filesplus/modkit/Hooks;->xxx(…)`」を差し込むだけにして、処理はすべて extension に書く（DESIGN.md の P2）。
 - smbj、ModKit 用の Media3 などのライブラリも extension に入れる。**サイズとメソッド数**に注意する（FFmpeg のようなネイティブライブラリは Phase 6 で扱いを決める）。
 
 ### 3.4 パッケージ名の変更（システムアプリと共存させるため）
 - Morphe には「Clone（別パッケージ名で作る）」の仕組みがあるが、**汎用のパッチがこのアプリの ContentProvider の authority まで正しく書き換えるかは未確認**。
-- そのため、バンドルに専用のパッチ「Files Mod package」を入れる:
+- そのため、バンドルに専用のパッチ「Change package name」を入れる:
   1. `package` を `com.google.android.apps.nbu.files.mod` に変える（オプションで変えられる）
   2. すべての `<provider android:authorities>` と独自の `<permission>` を新しい名前に合わせる（重複していると `INSTALL_FAILED_CONFLICTING_PROVIDER` で入らない）
   3. コードに直接書かれた authority の文字列を置き換える（共有・「別のアプリで開く」が落ちないように）
-  4. アプリ名を「Files Mod」にする（元の Files と見分けるため）
+  4. アプリ名を「FilesPlus」にする（元の Files と見分けるため）
 - 署名が変わるので、Firebase・Phenotype（実験フラグ）・Google ドライブへのバックアップなどの Google 連携は動かない。ファイル管理の基本機能には影響しない（DESIGN.md §8）。
 
 ## 4. ビルド（PC）
@@ -155,7 +155,7 @@ $env:JAVA_HOME = "C:\Program Files\Java\jdk-21.0.3"
   - `patches-list.json`、`patches-bundle.json`、`CHANGELOG.md` は自動生成されるので手で編集しない。
   - 開発は `dev` ブランチで行い、安定したら `main` へマージ（squash しない）。
 - リポジトリの設定（作成時に実施済み）: Actions のワークフロー権限を「読み書き」にし、PR の作成・承認を許可。
-- 状態の確認: `gh run list -R yak9909/ModdedFiles`、`gh release list -R yak9909/ModdedFiles`
+- 状態の確認: `gh run list -R yak9909/FilesPlus`、`gh release list -R yak9909/FilesPlus`
 - 任意: `./gradlew generateSigningKey` でバンドルに署名すると、Morphe Manager が改ざんされたリリースを拒否する。秘密鍵は `MORPHE_SIGNING_KEY` シークレットに入れる（`gh secret set MORPHE_SIGNING_KEY < morphe-signing.key`）。
 - ローカルでビルドするときだけ、PAT（`read:packages`）が必要。`gh` のトークンに権限を足して使える:
   ```
@@ -166,12 +166,12 @@ $env:JAVA_HOME = "C:\Program Files\Java\jdk-21.0.3"
 
 ## 5. 端末でパッチを当てる（adb を使わない手順）
 1. **元の APK を端末に置く**: APKMirror の APKM（端末に合う ABI・DPI のもの。§6）を端末にダウンロードする。
-2. **パッチソースを追加する**: Morphe Manager → パッチソース → **リモート** に `https://github.com/yak9909/ModdedFiles` を入れる（または端末のブラウザで `https://morphe.software/add-source?github=yak9909/ModdedFiles` を開く）。
+2. **パッチソースを追加する**: Morphe Manager → パッチソース → **リモート** に `https://github.com/yak9909/FilesPlus` を入れる（または端末のブラウザで `https://morphe.software/add-source?github=yak9909/FilesPlus` を開く）。
    - 開発版（`dev` ブランチのプレリリース）を試すときは、そのパッチソースで「プレリリース」を有効にする。
    - 新しいリリースが出ると Morphe Manager が知らせてくれる。
 3. （ローカルでビルドした .mpp を試す場合のみ）パッチソース → **ローカル** → `.mpp` を選ぶ。
 4. アプリの一覧から Files を選ぶ（出ない場合はエキスパートモードで「APK を持っている」→ APKM を選ぶ）。
-5. パッチを選ぶ（初回は「Files Mod package」と「ModKit integration」が必須。その他は好きなものを選ぶ）→ オプションを確認 → パッチ。
+5. パッチを選ぶ（初回は「Change package name」と「ModKit integration」が必須。その他は好きなものを選ぶ）→ オプションを確認 → パッチ。
 6. 通常のインストーラでインストールする（「提供元不明のアプリ」の許可を Morphe Manager に1回だけ与える）。
 7. **Morphe Manager の署名鍵をエクスポートしてバックアップする**（初回のみ。§5.1）。
 8. 更新時: 新しい .mpp（または新しい APKM）で 3〜6 をやり直すだけ。同じ鍵なので上書き更新でき、Mod 設定・移動先の履歴は残る。

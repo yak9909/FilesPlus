@@ -1,10 +1,10 @@
-group = "app.moddedfiles"
+group = "app.filesplus"
 
 patches {
     about {
         name = "yak9909 Files Patches"
         description = "Patches for Files by Google: custom skip duration, folder tab actions, move queue, SMB, high-res playback"
-        source = "git@github.com:yak9909/ModdedFiles.git"
+        source = "git@github.com:yak9909/FilesPlus.git"
         author = "yak9909"
         contact = "na"
         website = "na"
