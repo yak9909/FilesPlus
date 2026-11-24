@@ -1,6 +1,7 @@
 package app.filesplus.extension.clip;
 
 import android.content.Context;
+import android.content.res.Resources;
 import android.graphics.drawable.Drawable;
 import android.os.Handler;
 import android.os.Looper;
@@ -11,6 +12,7 @@ import android.widget.Toast;
 import app.filesplus.extension.DiagLog;
 import app.filesplus.extension.ModKit;
 import app.filesplus.extension.browse.LocalFolders;
+import app.filesplus.extension.clip.Clipboard.Mode;
 import app.filesplus.extension.foldertabs.FolderTabContext;
 import app.filesplus.extension.foldertabs.TabMove;
 import app.filesplus.extension.preview.SelectionStore;
@@ -30,6 +32,7 @@ import java.util.concurrent.Executors;
 public final class ClipHooks {
     private static final int CUT = 0x7e434c31;
     private static final int ADD = 0x7e434c32;
+    private static final int COPY = 0x7e434c33;
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
     private static final ExecutorService WORKER = Executors.newSingleThreadExecutor();
     private static final Map<Menu, Object> REQUESTS = new WeakHashMap<>();
@@ -100,6 +103,19 @@ public final class ClipHooks {
         return "ja".equals(context.getResources().getConfiguration().getLocales().get(0).getLanguage());
     }
 
+    private static String copyLabel(Context context) {
+        Resources resources = context.getResources();
+        int id = resources.getIdentifier("copy", "string", context.getPackageName());
+        if (id != 0) {
+            try {
+                return resources.getString(id);
+            } catch (Resources.NotFoundException missing) {
+                hookError(missing);
+            }
+        }
+        return japanese(context) ? "コピー" : "Copy";
+    }
+
     private static String addLabel(Context context) {
         return japanese(context) ? "クリップボードに追加" : "Add to clipboard";
     }
@@ -108,6 +124,7 @@ public final class ClipHooks {
 
     private static void remove(Menu menu) {
         menu.removeItem(CUT);
+        menu.removeItem(COPY);
         menu.removeItem(ADD);
     }
 
@@ -124,14 +141,18 @@ public final class ClipHooks {
             enabled |= item.isVisible() && item.isEnabled();
         }
         if (!enabled) return;
-        addMenuItem(context, menu, CUT, context.getString(android.R.string.cut), sources, false);
-        if (!Clipboard.get(context).isEmpty()) addMenuItem(context, menu, ADD, addLabel(context), sources, true);
+        addMenuItem(menu, CUT, context.getString(android.R.string.cut), action(context, sources, Mode.CUT, false));
+        addMenuItem(menu, COPY, copyLabel(context), action(context, sources, Mode.COPY, false));
+        Clipboard.State state = Clipboard.get(context);
+        if (state.canAdd(state.mode)) {
+            addMenuItem(menu, ADD, addLabel(context), action(context, sources, state.mode, true));
+        }
     }
 
-    private static void addMenuItem(Context context, Menu menu, int id, String label, Sources sources, boolean add) {
+    private static void addMenuItem(Menu menu, int id, String label, Runnable action) {
         menu.add(Menu.NONE, id, Menu.NONE, label).setOnMenuItemClickListener(item -> {
-            try { enqueue(context, sources, add); return true; }
-            catch (Throwable error) { hookError(error); return false; }
+            action.run();
+            return true;
         }).setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
     }
 
@@ -211,15 +232,18 @@ public final class ClipHooks {
             Context context = ModKit.context();
             List<Object> out = new ArrayList<>(original);
             Sources sources = () -> Collections.singletonList(source);
-            out.add(factory.clipMenuRow(context.getString(android.R.string.cut), action(context, sources, false)));
-            if (!Clipboard.get(context).isEmpty())
-                out.add(factory.clipMenuRow(addLabel(context), action(context, sources, true)));
+            out.add(factory.clipMenuRow(context.getString(android.R.string.cut), action(context, sources, Mode.CUT, false)));
+            out.add(factory.clipMenuRow(copyLabel(context), action(context, sources, Mode.COPY, false)));
+            Clipboard.State state = Clipboard.get(context);
+            if (state.canAdd(state.mode)) {
+                out.add(factory.clipMenuRow(addLabel(context), action(context, sources, state.mode, true)));
+            }
             return out;
         } catch (Throwable error) { hookError(error); return original; }
     }
 
-    private static Runnable action(Context context, Sources sources, boolean add) {
-        return () -> { try { enqueue(context, sources, add); } catch (Throwable error) { hookError(error); } };
+    private static Runnable action(Context context, Sources sources, Mode mode, boolean add) {
+        return () -> { try { enqueue(context, sources, mode, add); } catch (Throwable error) { hookError(error); } };
     }
 
     public static void preview(View root, Menu menu, long id, boolean hasId, Object current) {
@@ -246,9 +270,9 @@ public final class ClipHooks {
         } catch (Throwable error) { hookError(error); }
     }
 
-    private static void enqueue(Context context, Sources sources, boolean add) {
+    private static void enqueue(Context context, Sources sources, Mode mode, boolean add) {
         Context app = context.getApplicationContext();
-        WORKER.execute(() -> {
+        TabMove.fileExecutor().execute(() -> {
             int skipped = 0;
             List<ClipItem> measured = new ArrayList<>();
             try {
@@ -268,9 +292,14 @@ public final class ClipHooks {
                 measured.addAll(unique.values());
                 // An all-skipped request must not destroy the previous clipboard.
                 if (!measured.isEmpty()) {
-                    Clipboard.get(app); // expire old contents before Add
-                    if (add) Clipboard.add(app, measured);
-                    else Clipboard.cut(app, measured);
+                    if (add) {
+                        if (!Clipboard.add(app, mode, measured)) {
+                            skipped += measured.size();
+                            measured.clear();
+                        }
+                    } else {
+                        Clipboard.replace(app, mode, measured);
+                    }
                 }
             } catch (Throwable error) {
                 hookError(error);
@@ -283,8 +312,14 @@ public final class ClipHooks {
                 try {
                     boolean ja = japanese(app);
                     String noun = count == 1 ? " item" : " items";
-                    String text = add ? (ja ? count + " 件をクリップボードに追加しました" : "Added " + count + noun + " to clipboard")
-                            : (ja ? count + " 件を切り取りました" : "Cut " + count + noun);
+                    String text;
+                    if (add) {
+                        text = ja ? count + " 件をクリップボードに追加しました" : "Added " + count + noun + " to clipboard";
+                    } else if (mode == Mode.COPY) {
+                        text = ja ? count + " 件をコピーしました" : "Copied " + count + noun;
+                    } else {
+                        text = ja ? count + " 件を切り取りました" : "Cut " + count + noun;
+                    }
                     if (ignored > 0) text += ja ? "（" + ignored + " 件をスキップ）" : " (" + ignored + " skipped)";
                     Toast.makeText(app, text, Toast.LENGTH_SHORT).show();
                 } catch (Throwable error) { hookError(error); }

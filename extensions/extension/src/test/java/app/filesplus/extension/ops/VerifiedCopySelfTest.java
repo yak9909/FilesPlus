@@ -164,17 +164,24 @@ public final class VerifiedCopySelfTest {
 
     private static final class Fixture implements VerifiedCopy.Observer {
         final FaultFs src = new FaultFs(1);
-        final FaultFs dst = new FaultFs(2);
+        final FaultFs dst;
+        final String destination;
         final VerifiedCopy.Job job = new VerifiedCopy.Job();
         final List<String> parts = new ArrayList<>();
         final List<String> reservations = new ArrayList<>();
 
-        Fixture() { src.put("/src/movie.mp4", DATA); }
+        Fixture() { this(false); }
+
+        Fixture(boolean sameFolder) {
+            dst = sameFolder ? src : new FaultFs(2);
+            destination = sameFolder ? "/src" : "/dst";
+            src.put("/src/movie.mp4", DATA);
+        }
 
         VerifiedCopy.Result copy() { return copy("movie.mp4", true, () -> false); }
 
         VerifiedCopy.Result copy(String name, boolean removable, VerifiedCopy.Cancellation cancellation) {
-            return VerifiedCopy.copy(src, "/src/movie.mp4", dst, "/dst", name, removable, job, cancellation, this);
+            return VerifiedCopy.copy(src, "/src/movie.mp4", dst, destination, name, removable, job, cancellation, this);
         }
 
         VerifiedCopy.Result copyItem(String name) {
@@ -204,7 +211,7 @@ public final class VerifiedCopySelfTest {
 
         boolean clean() {
             return parts.isEmpty() && reservations.isEmpty()
-                    && dst.list("/dst").stream().noneMatch(VerifiedCopy::isPartName);
+                    && dst.list(destination).stream().noneMatch(VerifiedCopy::isPartName);
         }
 
         boolean sourceKept() { return src.has("/src/movie.mp4", DATA); }
@@ -232,6 +239,23 @@ public final class VerifiedCopySelfTest {
                 && normal.dst.syncs == 1 && normal.dst.partReads == 1 && normal.dst.directorySyncs == 1
                 && normal.dst.lstat(copied.target).mtime.equals(normal.src.lstat("/src/movie.mp4").mtime)
                 && normal.clean() && normal.sourceKept());
+
+        Fixture same = new Fixture(true);
+        Fs.Stat original = same.src.lstat("/src/movie.mp4");
+        VerifiedCopy.Result duplicate = same.copy();
+        check("same-folder copy keeps the source and verifies movie (1).mp4",
+                "/src/movie (1).mp4".equals(duplicate.target) && same.verified(duplicate.target)
+                        && same.sourceKept() && original.unchanged(same.src.lstat("/src/movie.mp4"))
+                        && same.dst.partReads == 1 && same.clean());
+
+        Fixture badSame = new Fixture(true);
+        badSame.dst.fault = Fault.FLIP;
+        badSame.dst.faultsLeft = 2;
+        Fs.Stat unmodified = badSame.src.lstat("/src/movie.mp4");
+        check("same-folder verification failure leaves only the original",
+                badSame.copy().reason == VerifiedCopy.Reason.HASH_MISMATCH
+                        && badSame.sourceKept() && unmodified.unchanged(badSame.src.lstat("/src/movie.mp4"))
+                        && badSame.dst.list("/src").equals(List.of("movie.mp4")) && badSame.clean());
 
         Fixture clash = new Fixture();
         clash.dst.put("/dst/MOVIE.mp4", OTHER);

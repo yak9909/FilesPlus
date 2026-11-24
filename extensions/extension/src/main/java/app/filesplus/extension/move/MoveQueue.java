@@ -36,7 +36,7 @@ import java.util.Set;
  * thread. Audio/video that is still shown on the current preview page is held until the user leaves
  * that page or the preview closes. Holds only the application context, never an Activity or View.
  *
- * <p>{@link #paste} runs the clipboard (cut) through the same engine: {@link TabMove#move} on the single file
+ * <p>{@link #paste} runs Cut and Copy through TabMove on the single file
  * thread, including verified cross-volume file moves.
  */
 public final class MoveQueue {
@@ -68,6 +68,7 @@ public final class MoveQueue {
         public PasteRules.Reason refused;
         public File destination;
         public int moved;
+        public int copied;
         /** Items that no longer existed (deleted or renamed elsewhere, SD card removed). */
         public int missing;
         /** Items already in the destination folder (skipped). */
@@ -297,9 +298,15 @@ public final class MoveQueue {
                             }
                         };
                     }
-                    result = batch.paste == null ? TabMove.move(batch.app, paths, destination)
-                            : TabMove.move(batch.app, paths, destination, listener, batch.paste.copyJob,
-                                    batch.paste.budget);
+                    if (batch.paste == null) {
+                        result = TabMove.move(batch.app, paths, destination);
+                    } else if (batch.paste.state.mode == Clipboard.Mode.COPY) {
+                        result = TabMove.copy(batch.app, paths, destination, listener, batch.paste.copyJob,
+                                batch.paste.budget);
+                    } else {
+                        result = TabMove.move(batch.app, paths, destination, listener, batch.paste.copyJob,
+                                batch.paste.budget);
+                    }
                 }
             }
         } catch (Throwable t) {
@@ -316,6 +323,7 @@ public final class MoveQueue {
             TabMove.Result total = batch.moves;
             synchronized (batch) {
                 total.moved += result.moved;
+                total.copied += result.copied;
                 total.skipped += result.skipped;
                 total.failed += result.failed;
                 total.keptSources.addAll(result.keptSources);
@@ -349,7 +357,7 @@ public final class MoveQueue {
         }
     }
 
-    // ---- paste (clipboard cut -> folder) ---------------------------------------------------------------------
+    // ---- paste (clipboard -> folder) ---------------------------------------------------------------------
 
     /** Pastes the clipboard into an existing folder. See {@link #paste(Context, Clipboard.State, File, boolean, PasteCallback)}. */
     public static void paste(Context app, Clipboard.State state, File dest, PasteCallback callback) {
@@ -357,14 +365,14 @@ public final class MoveQueue {
     }
 
     /**
-     * Moves the items of a cut clipboard into {@code dest}, one batch on the single file thread. Returns at once;
+     * Pastes the clipboard items into {@code dest}, one batch on the single file thread. Returns at once;
      * the callback runs on the main thread when everything is done (items that play on the current preview page
      * wait until the page is left, as in the move queue). Safe to call twice: the rules are checked again here, a
      * source that is already part of an unfinished paste is skipped (counted as busy), and items that no longer
      * exist are skipped and counted as missing.
      *
-     * <p>A successful paste empties the clipboard; after failures only the items that are still where they were
-     * stay in it. The destination becomes the "last pasted folder". With {@code createIfMissing} a missing
+     * <p>COPY keeps the clipboard for reuse. A successful CUT paste clears it, and after failures it retains
+     * the remaining items. The destination becomes the "last pasted folder". With {@code createIfMissing} a missing
      * destination folder is created (one level, below an existing writable folder).
      */
     public static void paste(Context app, Clipboard.State state, File dest, boolean createIfMissing,
@@ -417,7 +425,7 @@ public final class MoveQueue {
         }
     }
 
-    /** Runs on the file thread: re-checks the rules, drops missing items, defers playing ones, moves the rest. */
+    /** Runs on the file thread: re-checks the rules, drops missing items, defers playing ones, transfers the rest. */
     private static void plan(Context context, PasteJob paste, File dest, boolean createIfMissing,
                              List<ClipItem> claimed) {
         boolean started = false;
@@ -546,18 +554,20 @@ public final class MoveQueue {
         try {
             PasteResult result = paste.result;
             result.moved = moves.moved;
+            result.copied = moves.copied;
             result.sameFolder = moves.skipped;
             result.failed = moves.failed;
             result.moveDetails = moves;
-            if (moves.moved > 0) DestinationHistory.recordLast(batch.destination);
-            // Success empties the clipboard. After failures the items that are still where they were stay in it.
-            List<ClipItem> remaining = new ArrayList<>();
-            if (moves.failed > 0) {
-                for (ClipItem item : paste.present) {
-                    if (!moves.keptSources.contains(item.path()) && stillThere(item, batch.destination)) remaining.add(item);
+            if (moves.moved > 0 || moves.copied > 0) DestinationHistory.recordLast(batch.destination);
+            if (paste.state.mode == Clipboard.Mode.CUT) {
+                List<ClipItem> remaining = new ArrayList<>();
+                if (moves.failed > 0) {
+                    for (ClipItem item : paste.present) {
+                        if (!moves.keptSources.contains(item.path()) && stillThere(item, batch.destination)) remaining.add(item);
+                    }
                 }
+                Clipboard.finishCut(batch.app, paste.state, remaining);
             }
-            Clipboard.finishCut(batch.app, paste.state, remaining);
         } catch (Throwable t) {
             DiagLog.e(AREA, "paste finish failed", t);
         } finally {
@@ -612,12 +622,15 @@ public final class MoveQueue {
         boolean ja = "ja".equals(context.getResources().getConfiguration().getLocales().get(0).getLanguage());
         String path = r.destination.getAbsolutePath();
         StringBuilder sb = new StringBuilder();
-        if (r.moved == 0 && r.failed > 0) {
+        int completed = r.moved + r.copied;
+        if (completed == 0 && r.failed > 0) {
             sb.append(ja ? "貼り付けできませんでした（" + r.failed + " 件）" : "Could not paste " + r.failed
                     + (r.failed == 1 ? " item" : " items"));
             sb.append(ja ? " 貼り付け先: " : " to ").append(path);
-        } else if (r.moved == 0) {
+        } else if (completed == 0) {
             sb.append(ja ? "貼り付けるものがありませんでした 貼り付け先: " : "Nothing to paste to ").append(path);
+        } else if (r.copied > 0) {
+            sb.append(copySummary(r.copied, path, ja));
         } else if (ja) {
             sb.append(r.moved).append(" 件を ").append(path).append(" に貼り付けました");
         } else {
@@ -627,14 +640,18 @@ public final class MoveQueue {
             if (r.missing > 0) sb.append("（").append(r.missing).append(" 件はなくなっていたためスキップ）");
             if (r.sameFolder > 0) sb.append("（").append(r.sameFolder).append(" 件はすでにそのフォルダにあります）");
             if (r.busy > 0) sb.append("（").append(r.busy).append(" 件は処理中のためスキップ）");
-            if (r.failed > 0 && r.moved > 0) sb.append("（").append(r.failed).append(" 件は失敗）");
+            if (r.failed > 0 && completed > 0) sb.append("（").append(r.failed).append(" 件は失敗）");
         } else {
             if (r.missing > 0) sb.append(" (").append(r.missing).append(" missing, skipped)");
             if (r.sameFolder > 0) sb.append(" (").append(r.sameFolder).append(" already in the folder)");
             if (r.busy > 0) sb.append(" (").append(r.busy).append(" busy, skipped)");
-            if (r.failed > 0 && r.moved > 0) sb.append(" (").append(r.failed).append(" failed)");
+            if (r.failed > 0 && completed > 0) sb.append(" (").append(r.failed).append(" failed)");
         }
         return withMoveNotes(sb.toString(), ja, r.moveDetails);
+    }
+
+    static String copySummary(int count, String path, boolean ja) {
+        return ja ? count + " 件を " + path + " にコピーしました" : "Copied " + count + " item(s) to " + path;
     }
 
     static String withMoveNotes(String summary, boolean ja, TabMove.Result result) {

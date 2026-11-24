@@ -514,6 +514,9 @@ public final class SettingsPages {
         }
         row(screen, tr("クリップボードのフック", "Clipboard hooks"),
                 app.filesplus.extension.clip.ClipHooks.installedHooks(), null);
+        Clipboard.State clip = Clipboard.get(activity);
+        row(screen, tr("クリップボード", "Clipboard"),
+                clip.isEmpty() ? tr("空", "Empty") : clip.mode.name() + " (" + clip.items.size() + ")", null);
         row(screen, tr("プレビューの長押しフック", "Preview long-press hook"),
                 PreviewHooks.longPressInstalled() ? tr("適用済み", "Installed") : tr("未適用", "Not installed"),
                 null);

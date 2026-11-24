@@ -11,6 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
 
@@ -98,15 +99,32 @@ public final class VerifiedFolderMove {
         }
 
         private boolean record(String source, Manifest manifest) {
+            return record(source, manifest.pasteEntries(), manifest.bytes);
+        }
+
+        public long availableFileBytes(String source) {
+            Usage previous = measured.get(source);
+            if (previous == null && entries >= maxEntries) return -1;
+            return availableBytes(source);
+        }
+
+        private long availableBytes(String source) {
+            Usage previous = measured.get(source);
+            return maxBytes - bytes + (previous == null ? 0 : previous.bytes);
+        }
+
+        public void recordCopiedFile(String source, long size) {
+            if (!record(source, 1, size)) throw new IllegalStateException("Copied file exceeds paste budget");
+        }
+
+        private boolean record(String source, int count, long size) {
             Usage previous = measured.get(source);
             int otherEntries = entries - (previous == null ? 0 : previous.entries);
-            long otherBytes = bytes - (previous == null ? 0 : previous.bytes);
-            if (manifest.pasteEntries() > maxEntries - otherEntries || manifest.bytes > maxBytes - otherBytes) {
-                return false;
-            }
-            measured.put(source, new Usage(manifest.pasteEntries(), manifest.bytes));
-            entries = otherEntries + manifest.pasteEntries();
-            bytes = otherBytes + manifest.bytes;
+            long available = availableBytes(source);
+            if (count > maxEntries - otherEntries || size > available) return false;
+            bytes = maxBytes - available + size;
+            entries = otherEntries + count;
+            measured.put(source, new Usage(count, size));
             return true;
         }
     }
@@ -149,6 +167,18 @@ public final class VerifiedFolderMove {
 
     public static Result move(Fs srcFs, String source, Fs dstFs, String destination, String name, boolean removable,
                               Job job, Cancellation cancellation, Observer observer, Trash trash, PasteBudget budget) {
+        return transfer(srcFs, source, dstFs, destination, name, removable, job, cancellation, observer,
+                Objects.requireNonNull(trash), budget);
+    }
+
+    public static Result copy(Fs srcFs, String source, Fs dstFs, String destination, String name, boolean removable,
+                              Job job, Cancellation cancellation, Observer observer, PasteBudget budget) {
+        return transfer(srcFs, source, dstFs, destination, name, removable, job, cancellation, observer, null, budget);
+    }
+
+    private static Result transfer(Fs srcFs, String source, Fs dstFs, String destination, String name,
+                                   boolean removable, Job job, Cancellation cancellation, Observer observer,
+                                   Trash trash, PasteBudget budget) {
         if (job.stopped()) return new Result(null, 0, Collections.emptyList(), Reason.HASH_MISMATCH, false);
         String opId = VerifiedCopy.newOpId();
         Manifest manifest = budget == null ? new Manifest(MAX_ENTRIES, Long.MAX_VALUE)
@@ -156,7 +186,7 @@ public final class VerifiedFolderMove {
         try {
             Path src = new File(source.toLowerCase(Locale.ROOT)).toPath().normalize();
             Path dst = new File(destination.toLowerCase(Locale.ROOT)).toPath().normalize();
-            if (dst.startsWith(src)) throw new Failed(Reason.IO, "Cannot move a folder into itself: " + source);
+            if (dst.startsWith(src)) throw new Failed(Reason.IO, "Cannot transfer a folder into itself: " + source);
             Fs.Stat root = srcFs.lstat(source);
             requireDirectory(source, root);
             Fs.Stat parent = dstFs.lstat(destination);
@@ -169,13 +199,15 @@ public final class VerifiedFolderMove {
             List<String> children = new ArrayList<>(manifest.entries.keySet());
             children.remove(0); // TabMove scans the root separately.
             VerifiedCopy.checkSpace(dstFs, destination, manifest.bytes);
+            SourceCheck sourceCheck = () -> checkSource(srcFs, source, name, root.device, manifest, observer);
             String target = stageAndPublish(srcFs, source, dstFs, destination, name, removable, parent, tree,
-                    opId, cancellation, observer);
+                    opId, cancellation, observer, trash == null ? sourceCheck : null);
             job.finish(null, observer);
+            if (trash == null) return new Result(target, manifest.bytes, children, null, false);
             boolean kept = false;
             try {
                 trash.move(opId, manifest.fileCount, manifest.bytes, () -> {
-                    checkSource(srcFs, source, name, root.device, manifest, observer);
+                    sourceCheck.check();
                     if (!parent.sameFile(dstFs.lstat(destination)) || !tree.created.sameFile(dstFs.lstat(target))) {
                         throw new IOException("Committed folder or its parent changed: " + target);
                     }
@@ -188,7 +220,7 @@ public final class VerifiedFolderMove {
         } catch (IOException e) {
             Reason reason = VerifiedCopy.reason(e);
             job.finish(reason, observer);
-            observer.log(reason + " moving folder " + source, e);
+            observer.log(reason + (trash == null ? " copying folder " : " moving folder ") + source, e);
             return new Result(null, manifest.bytes, Collections.emptyList(), reason, false);
         }
     }
@@ -243,7 +275,8 @@ public final class VerifiedFolderMove {
 
     private static String stageAndPublish(Fs srcFs, String source, Fs dstFs, String destination, String name,
                                           boolean removable, Fs.Stat parent, Entry tree, String opId,
-                                          Cancellation cancellation, Observer observer) throws IOException {
+                                          Cancellation cancellation, Observer observer, SourceCheck beforePublish)
+            throws IOException {
         Fs.Directory directory = dstFs.openDirectory(destination, parent);
         boolean committed = false;
         try {
@@ -265,6 +298,7 @@ public final class VerifiedFolderMove {
                 }
                 copyDirectory(srcFs, source, dstFs, part, tree, parent.device, new byte[VerifiedCopy.CHUNK],
                         cancellation, observer);
+                if (beforePublish != null) beforePublish.check();
                 verifyStaging(dstFs, part, tree, cancellation);
                 String targetName = publish(dstFs, folder, destination, parent, name, removable, part, tree.created,
                         cancellation, observer);
