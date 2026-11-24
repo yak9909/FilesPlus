@@ -26,6 +26,7 @@ import app.filesplus.extension.ModSettings;
 import app.filesplus.extension.preview.PreviewHooks;
 import app.filesplus.extension.thumbs.VideoThumbHooks;
 import app.filesplus.extension.browse.Category;
+import app.filesplus.extension.browse.StorageGridColumns;
 import app.filesplus.extension.browse.ViewSwitch;
 import app.filesplus.extension.clip.PasteSelfTest;
 import app.filesplus.extension.clip.Clipboard;
@@ -145,6 +146,7 @@ public final class SettingsPages {
     private static boolean validPage(String page) {
         return "root".equals(page) || "tabs".equals(page) || "skip".equals(page) || "preview".equals(page)
                 || "clipboard".equals(page) || "switch".equals(page) || "smb".equals(page) || "diag".equals(page)
+                || ("storage".equals(page) && StorageGridColumns.installed())
                 || ("thumbs".equals(page) && VideoThumbHooks.installed());
     }
 
@@ -152,6 +154,7 @@ public final class SettingsPages {
         return "tabs".equals(id) || "skip".equals(id) || "clipboard".equals(id)
                 || ("preview".equals(id) && PreviewHooks.longPressInstalled())
                 || ("switch".equals(id) && ViewSwitch.installed()) || "smb".equals(id)
+                || ("storage".equals(id) && StorageGridColumns.installed())
                 || ("thumbs".equals(id) && VideoThumbHooks.installed());
     }
 
@@ -164,6 +167,7 @@ public final class SettingsPages {
             case "preview": return tr("プレビュー", "Preview");
             case "clipboard": return tr("クリップボード", "Clipboard");
             case "switch": return tr("表示の切り替え", "View switching");
+            case "storage": return tr("ストレージブラウザ", "Storage browser");
             case "smb": return "SMB";
             case "thumbs": return tr("サムネイル", "Thumbnails");
             case "diag": return tr("診断", "Diagnostics");
@@ -174,7 +178,7 @@ public final class SettingsPages {
     private void populate() {
         switch (page) {
             case "root":
-                for (String id : new String[]{"tabs", "skip", "preview", "clipboard", "switch", "smb", "thumbs"}) {
+                for (String id : new String[]{"tabs", "skip", "preview", "clipboard", "switch", "storage", "smb", "thumbs"}) {
                     if (hasItems(id)) link(screen, id, titleOf(id));
                 }
                 break;
@@ -204,6 +208,7 @@ public final class SettingsPages {
                 break;
             case "clipboard": clipboard(); break;
             case "switch": if (ViewSwitch.installed()) viewSwitch(); break;
+            case "storage": storageGridColumns(); break;
             case "smb": smb(); break;
             case "thumbs": thumbnails(); break;
             case "diag": diagnostics(); break;
@@ -272,6 +277,23 @@ public final class SettingsPages {
                     tr("そのカテゴリで最新のファイルがあるフォルダ", "Folder with the newest file"),
                     tr("内部ストレージのルート", "Internal storage root")
                 });
+    }
+
+    private void storageGridColumns() {
+        String[] labels = {tr("元のまま", "Original"), "1", "2", "3", "4", "5"};
+        gridColumnChoice(ModSettings.GRID_STORAGE_FOLDER_COLUMNS, tr("フォルダの列数", "Folder columns"), labels);
+        gridColumnChoice(ModSettings.GRID_STORAGE_FILE_COLUMNS, tr("ファイルの列数", "File columns"), labels);
+    }
+
+    private void gridColumnChoice(String key, String title, String[] labels) {
+        Supplier<Integer> selected = () -> StorageGridColumns.choice(ModSettings.getInt(key, StorageGridColumns.ORIGINAL));
+        Object pref = preference(title, labels[selected.get()]);
+        bridge.setKey(pref, key);
+        bridge.setClick(pref, listener(bridge.clickType(), () -> choices(title, labels, selected.get(), which -> {
+            ModSettings.putInt(key, which);
+            bridge.setSummary(pref, labels[which]);
+        })));
+        bridge.addTo(screen, pref);
     }
 
     private void switchChoice(String key, String title, String[] values, String[] labels) {
@@ -497,6 +519,8 @@ public final class SettingsPages {
                 null);
         row(screen, tr("表示の切り替えのフック", "Switch view hooks"),
                 ViewSwitch.hookStatus(japanese), null);
+        row(screen, tr("ストレージブラウザのグリッド列数フック", "Storage grid columns hooks"),
+                StorageGridColumns.installed() ? tr("適用済み", "Installed") : tr("未適用", "Not installed"), null);
         row(screen, tr("圧縮ファイルのフック", "Archives filter hooks"),
                 app.filesplus.extension.browse.ArchiveFilter.installed()
                         ? tr("適用済み", "Installed") : tr("未適用", "Not installed"), null);
