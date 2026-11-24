@@ -137,11 +137,11 @@ public final class PasteSelfTest {
                 PasteRules.check(state(item(fileA)),
                         PasteTarget.ofAllTab(Category.IMAGES, "default", new File(a, "no/such/Pictures"), null, roots)),
                 PasteRules.Reason.NOT_WRITABLE);
-        // CROSS_VOLUME
+        // Cross-volume paste
         r.rule("OK: file on volume A, target on volume B",
                 PasteRules.check(state(item(fileA)), folder(otherVolume, roots)), null);
-        r.rule("CROSS_VOLUME: folder on volume A, target on volume B",
-                PasteRules.check(state(item(src)), folder(otherVolume, roots)), PasteRules.Reason.CROSS_VOLUME);
+        r.rule("folder on volume A, target on volume B",
+                PasteRules.check(state(item(src)), folder(otherVolume, roots)), null);
         r.rule("TOO_LARGE: 51 cross-volume files",
                 PasteRules.check(state(many(src, 51, 1)), folder(otherVolume, roots)), PasteRules.Reason.TOO_LARGE);
         r.rule("TOO_LARGE: cross-volume file above 100MB",
@@ -335,7 +335,7 @@ public final class PasteSelfTest {
             } else {
                 r.rule("device: file to the SD card (" + sd + ")", got, null);
                 r.rule("device: folder to the SD card (" + sd + ")",
-                        PasteRules.check(state(item(src)), PasteTarget.ofFolder(sd)), PasteRules.Reason.CROSS_VOLUME);
+                        PasteRules.check(state(item(src)), PasteTarget.ofFolder(sd)), null);
             }
         } else {
             r.skip("device: cross-volume paste rules", "no SD card or second volume");

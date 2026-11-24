@@ -14,6 +14,7 @@ import app.filesplus.extension.clip.PasteRules;
 import app.filesplus.extension.clip.PasteTarget;
 import app.filesplus.extension.foldertabs.TabMove;
 import app.filesplus.extension.ops.VerifiedCopy;
+import app.filesplus.extension.ops.VerifiedFolderMove;
 
 import java.io.File;
 import java.io.IOException;
@@ -74,8 +75,6 @@ public final class MoveQueue {
         /** Items that are part of another unfinished paste (skipped, not touched). */
         public int busy;
         public int failed;
-        /** Subset of {@link #failed}: folders on another volume. */
-        public int crossVolume;
         /** Items held until the preview page they play on is left. */
         public int held;
         private TabMove.Result moveDetails;
@@ -88,6 +87,7 @@ public final class MoveQueue {
         final PasteResult result = new PasteResult();
         final List<ClipItem> present = new ArrayList<>();
         final VerifiedCopy.Job copyJob = new VerifiedCopy.Job();
+        VerifiedFolderMove.PasteBudget budget;
         /** The record of this paste in {@link Clipboard#beginPaste}. */
         long token;
 
@@ -286,19 +286,20 @@ public final class MoveQueue {
                                 Clipboard.unreserve(batch.app, token, target.getPath());
                             }
 
-                            @Override public void partStarted(File part) throws IOException {
-                                if (!Clipboard.recordPart(batch.app, token, part.getPath())) {
+                            @Override public void partStarted(File part, boolean directory) throws IOException {
+                                if (!Clipboard.recordPart(batch.app, token, part.getPath(), directory)) {
                                     throw new IOException("Cannot record temporary path: " + part);
                                 }
                             }
 
-                            @Override public void partFinished(File part) {
-                                Clipboard.forgetPart(batch.app, token, part.getPath());
+                            @Override public void partFinished(File part, boolean directory) {
+                                Clipboard.forgetPart(batch.app, token, part.getPath(), directory);
                             }
                         };
                     }
                     result = batch.paste == null ? TabMove.move(batch.app, paths, destination)
-                            : TabMove.move(batch.app, paths, destination, listener, batch.paste.copyJob);
+                            : TabMove.move(batch.app, paths, destination, listener, batch.paste.copyJob,
+                                    batch.paste.budget);
                 }
             }
         } catch (Throwable t) {
@@ -317,7 +318,7 @@ public final class MoveQueue {
                 total.moved += result.moved;
                 total.skipped += result.skipped;
                 total.failed += result.failed;
-                total.crossVolume += result.crossVolume;
+                total.keptSources.addAll(result.keptSources);
                 total.reasons.addAll(result.reasons);
                 total.hashStopped |= result.hashStopped;
                 total.sourceKept |= result.sourceKept;
@@ -429,21 +430,33 @@ public final class MoveQueue {
                 reportPaste(context, paste);
                 return;
             }
+            // Count current data before creating the destination or starting any item, including deferred ones.
+            List<String> presentPaths = new ArrayList<>();
+            List<String> missingPaths = new ArrayList<>();
+            for (ClipItem item : claimed) {
+                if (Files.exists(new File(item.path()).toPath(), LinkOption.NOFOLLOW_LINKS)) {
+                    paste.present.add(item);
+                    presentPaths.add(item.path());
+                } else {
+                    paste.result.missing++;
+                    missingPaths.add(item.path());
+                }
+            }
+            paste.budget = TabMove.measurePaste(presentPaths);
+            if (paste.budget == null) {
+                release(claimed);
+                paste.result.refused = PasteRules.Reason.TOO_LARGE;
+                DiagLog.i(AREA, "Paste exceeds live entry or byte limits: " + dest);
+                reportPaste(context, paste);
+                return;
+            }
             if (!dest.isDirectory() && createIfMissing && !dest.mkdir() && !dest.isDirectory()) {
                 release(claimed);
                 paste.result.refused = PasteRules.Reason.NOT_WRITABLE;
                 reportPaste(context, paste);
                 return;
             }
-            // Items that are gone are skipped and counted; they are never an error.
-            for (ClipItem item : claimed) {
-                if (Files.exists(new File(item.path()).toPath(), LinkOption.NOFOLLOW_LINKS)) {
-                    paste.present.add(item);
-                } else {
-                    paste.result.missing++;
-                    release(Collections.singletonList(item.path()));
-                }
-            }
+            release(missingPaths);
             paste.token = Clipboard.beginPaste(context, dest.getCanonicalPath());
             started = true;
 
@@ -535,14 +548,13 @@ public final class MoveQueue {
             result.moved = moves.moved;
             result.sameFolder = moves.skipped;
             result.failed = moves.failed;
-            result.crossVolume = moves.crossVolume;
             result.moveDetails = moves;
             if (moves.moved > 0) DestinationHistory.recordLast(batch.destination);
             // Success empties the clipboard. After failures the items that are still where they were stay in it.
             List<ClipItem> remaining = new ArrayList<>();
             if (moves.failed > 0) {
                 for (ClipItem item : paste.present) {
-                    if (stillThere(item, batch.destination)) remaining.add(item);
+                    if (!moves.keptSources.contains(item.path()) && stillThere(item, batch.destination)) remaining.add(item);
                 }
             }
             Clipboard.finishCut(batch.app, paste.state, remaining);
@@ -629,7 +641,17 @@ public final class MoveQueue {
         if (result == null) return summary;
         // Text toasts can truncate the summary, so put the reason before the destination path.
         StringBuilder text = new StringBuilder();
-        if (result.crossVolume > 0) text.append(TabMove.crossVolumeNote(ja)).append('\n');
+        if (result.reasons.contains(VerifiedCopy.Reason.TOP_LEVEL_LINK)) {
+            text.append(ja ? "リンクは移動できません" : "Links cannot be moved").append('\n');
+        }
+        if (result.reasons.contains(VerifiedCopy.Reason.LINK)) {
+            text.append(ja ? "リンクや別のストレージを含むフォルダは移動できません"
+                    : "Folders that contain links or other storage cannot be moved").append('\n');
+        }
+        if (result.reasons.contains(VerifiedCopy.Reason.TOO_LARGE)) {
+            text.append(ja ? "フォルダの項目が多すぎるか深すぎるため移動できません"
+                    : "The folder has too many items or is nested too deeply to move").append('\n');
+        }
         if (result.reasons.contains(VerifiedCopy.Reason.NAME_INVALID)) {
             text.append(ja
                     ? "SD カードで使えない文字（\" * : < > ? \\ |）や末尾の点・空白を含む名前は移動できません"
@@ -643,7 +665,7 @@ public final class MoveQueue {
                     : "Stopped: written data failed verification (check the SD card)").append('\n');
         }
         if (result.sourceKept) {
-            text.append(ja ? "元のファイルは残しました" : "The original file was kept").append('\n');
+            text.append(ja ? "元のファイル・フォルダは残しました" : "The original was kept").append('\n');
         }
         return text.length() == 0 ? summary : text.append(summary).toString();
     }

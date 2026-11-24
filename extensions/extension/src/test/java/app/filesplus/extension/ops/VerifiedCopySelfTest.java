@@ -65,6 +65,11 @@ public final class VerifiedCopySelfTest {
             return entry != null && Arrays.equals(entry.data, data);
         }
 
+        @Override public Directory openDirectory(String path, Stat expected) { throw new AssertionError(path); }
+        @Override public Stat mkdir(String path) { throw new AssertionError(path); }
+        @Override public void rmdir(String path) { throw new AssertionError(path); }
+        @Override public List<String> list(String folder, int limit) { throw new AssertionError(folder); }
+
         @Override public Stat lstat(String path) {
             Entry e = files.get(path);
             return e == null ? null : new Stat(e.type, e.data.length, e.mtime, e.inode, dev);

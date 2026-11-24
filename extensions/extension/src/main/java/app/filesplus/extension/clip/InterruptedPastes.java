@@ -7,7 +7,7 @@ import app.filesplus.extension.DiagLog;
 import app.filesplus.extension.browse.LocalFolders;
 import app.filesplus.extension.ops.Fs;
 import app.filesplus.extension.ops.LocalFs;
-import app.filesplus.extension.ops.VerifiedCopy;
+import app.filesplus.extension.ops.TemporaryMoveCleanup;
 
 import java.io.File;
 import java.nio.file.Files;
@@ -23,9 +23,12 @@ import java.util.Locale;
 public final class InterruptedPastes {
     private InterruptedPastes() {}
 
-    /** Removes regular files at exact recorded paths in the original, mounted destination folder. */
-    static List<String> cleanParts(Context context, String destination, List<String> paths) {
+    /** Removes temporary entries at exact recorded paths in the original, mounted destination folder. */
+    static List<String> cleanParts(Context context, Clipboard.Interrupted record) {
+        String destination = record.destination;
         File folder = new File(destination);
+        List<String> paths = new ArrayList<>(record.parts);
+        paths.addAll(record.partFolders);
         List<String> remaining = new ArrayList<>();
         try {
             if (!folder.isAbsolute() || !folder.equals(folder.getCanonicalFile())) return paths;
@@ -44,28 +47,25 @@ public final class InterruptedPastes {
             Fs.Stat destinationStat = fs.lstat(destination);
             if (destinationStat == null) return Collections.emptyList();
             if (destinationStat.type != Fs.Type.DIRECTORY) return paths;
-            for (String path : paths) {
-                File part = new File(path);
-                if (!folder.equals(part.getParentFile()) || !VerifiedCopy.isPartName(part.getName())) continue;
-                try {
-                    Fs.Stat stat = fs.lstat(path);
-                    if (stat == null) continue;
-                    if (stat.type == Fs.Type.FILE) {
-                        fs.unlink(path);
-                        DiagLog.i("clip", "Removed interrupted move temporary file: " + path);
-                    } else {
-                        DiagLog.e("clip", "Unexpected type at recorded temporary file: " + path, null);
-                    }
-                } catch (Throwable t) {
-                    remaining.add(path);
-                    DiagLog.e("clip", "Cannot remove interrupted move temporary file: " + path, t);
-                }
-            }
+            clean(fs, destination, destinationStat, record.parts, false, remaining);
+            clean(fs, destination, destinationStat, record.partFolders, true, remaining);
         } catch (Throwable t) {
             DiagLog.e("clip", "Cannot check interrupted move destination: " + folder, t);
             return paths;
         }
         return remaining;
+    }
+
+    private static void clean(Fs fs, String destination, Fs.Stat parent, List<String> paths, boolean directory,
+                              List<String> remaining) {
+        for (String path : paths) {
+            try {
+                TemporaryMoveCleanup.clean(fs, destination, parent, path, directory, message -> DiagLog.i("clip", message));
+            } catch (Throwable t) {
+                remaining.add(path);
+                DiagLog.e("clip", "Cannot remove interrupted move temporary entry: " + path, t);
+            }
+        }
     }
 
     /** One line per paste, without file access: the folder and the first reserved names. */
@@ -88,11 +88,11 @@ public final class InterruptedPastes {
     public static String report(List<Clipboard.Interrupted> list, boolean ja) {
         StringBuilder sb = new StringBuilder();
         sb.append(ja ? "貼り付けの途中でアプリが止まった記録です。名前を確保した直後（移動の直前）に止まると、"
-                + "その名前に 0 バイトのファイルか空のフォルダが残ります。記録された一時ファイルは起動時に片付けます。"
+                + "その名前に 0 バイトのファイルか空のフォルダが残ります。記録された一時ファイル・フォルダは起動時に片付けます。"
                 + "不要なら、ファイルアプリで確かめて自分で削除してください。"
                 : "Pastes that were cut short because the app stopped. If it stopped right after a name was reserved "
                 + "(just before the move), an empty 0-byte file or an empty folder can be left at that name. "
-                + "Recorded temporary files are cleaned up at startup. Check any reserved names in a file manager.");
+                + "Recorded temporary files and folders are cleaned up at startup. Check any reserved names in a file manager.");
         for (Clipboard.Interrupted record : list) {
             sb.append("\n\n").append(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date(record.at)))
                     .append("  ").append(record.destination);
@@ -101,6 +101,8 @@ public final class InterruptedPastes {
             }
             for (String name : record.reserved) sb.append("\n  ").append(state(name, ja)).append("  ").append(name);
             for (String name : record.parts) sb.append("\n  ").append(ja ? "[一時ファイル]" : "[temporary file]")
+                    .append("  ").append(name);
+            for (String name : record.partFolders) sb.append(ja ? "\n  [一時フォルダ]" : "\n  [temporary folder]")
                     .append("  ").append(name);
         }
         return sb.toString();

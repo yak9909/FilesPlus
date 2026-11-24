@@ -13,6 +13,7 @@ import app.filesplus.extension.DiagLog;
 import app.filesplus.extension.ops.Fs;
 import app.filesplus.extension.ops.LocalFs;
 import app.filesplus.extension.ops.VerifiedCopy;
+import app.filesplus.extension.ops.VerifiedFolderMove;
 
 import org.json.JSONObject;
 
@@ -68,15 +69,21 @@ final class FolderTrash {
     }
 
     static Result moveToTrash(File folder, File volumeRoot, long fileCount, long totalBytes) throws IOException {
-        return moveToTrash(folder, volumeRoot, fileCount, totalBytes, null, null);
+        return moveToTrash(folder, volumeRoot, fileCount, totalBytes, null, null, null);
     }
 
     static Result moveFileToTrash(File file, File volumeRoot, String opId, Fs.Stat expected) throws IOException {
-        return moveToTrash(file, volumeRoot, 1, expected.size, opId, expected);
+        return moveToTrash(file, volumeRoot, 1, expected.size, opId, expected, null);
+    }
+
+    static Result moveToTrash(File folder, File volumeRoot, long fileCount, long totalBytes, String opId,
+                              VerifiedFolderMove.SourceCheck check) throws IOException {
+        return moveToTrash(folder, volumeRoot, fileCount, totalBytes, opId, null, check);
     }
 
     private static Result moveToTrash(File source, File volumeRoot, long fileCount, long totalBytes,
-                                      String copyOpId, Fs.Stat expected) throws IOException {
+                                      String copyOpId, Fs.Stat expected, VerifiedFolderMove.SourceCheck folderCheck)
+            throws IOException {
         File base = new File(volumeRoot, ".FilesPlus");
         File trash = trashRoot(volumeRoot);
         try {
@@ -116,8 +123,8 @@ final class FolderTrash {
         if (opDir == null) throw new Failure("Cannot reserve a unique trash folder in " + trash, 0, null);
 
         String name = source.getName();
-        if (expected != null && ("manifest.json".equalsIgnoreCase(name) || "manifest.json.tmp".equalsIgnoreCase(name))) {
-            name = VerifiedCopy.candidate(name, false, 1);
+        if (copyOpId != null && ("manifest.json".equalsIgnoreCase(name) || "manifest.json.tmp".equalsIgnoreCase(name))) {
+            name = VerifiedCopy.candidate(name, folderCheck != null, 1);
         }
         File trashed = new File(opDir, name);
         File manifest = new File(opDir, "manifest.json");
@@ -128,7 +135,13 @@ final class FolderTrash {
         try {
             // Record the original path before renaming the source.
             writeManifest(manifestTmp, manifest, opId, source, trashed, fileCount, totalBytes, expected == null);
-            if (expected == null) {
+            if (folderCheck != null) {
+                reservation = fs.mkdir(trashed.getPath());
+                folderCheck.check();
+                if (!emptyReservation(fs, trashed.getPath(), reservation)) {
+                    throw new IOException("Trash folder reservation changed: " + trashed);
+                }
+            } else if (expected == null) {
                 if (trashed.exists()) throw new Failure("Trash target already exists: " + trashed, 0, null);
             } else {
                 try (Fs.Writer placeholder = fs.createExclusive(trashed.getPath())) {
@@ -152,7 +165,11 @@ final class FolderTrash {
                 if (reservation != null) {
                     try {
                         Fs.Stat current = fs.lstat(trashed.getPath());
-                        if (reservation.sameFile(current) && current.size == 0) fs.unlink(trashed.getPath());
+                        if (reservation.type == Fs.Type.DIRECTORY) {
+                            if (emptyReservation(fs, trashed.getPath(), reservation)) fs.rmdir(trashed.getPath());
+                        } else if (reservation.sameFile(current) && current.size == 0) {
+                            fs.unlink(trashed.getPath());
+                        }
                     } catch (IOException e) {
                         DiagLog.e(AREA, "Cannot release trash reservation " + trashed, e);
                     }
@@ -167,6 +184,13 @@ final class FolderTrash {
         result.opDir = opDir;
         result.trashed = trashed;
         return result;
+    }
+
+    private static boolean emptyReservation(Fs fs, String path, Fs.Stat reservation) throws IOException {
+        if (!reservation.sameFile(fs.lstat(path))) return false;
+        try (Fs.Directory directory = fs.openDirectory(path, reservation)) {
+            return fs.list(directory.path(), 1).isEmpty() && reservation.sameFile(fs.lstat(path));
+        }
     }
 
     private static void writeManifest(File tmp, File target, String opId, File original, File trashed,

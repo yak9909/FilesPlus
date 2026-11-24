@@ -4,6 +4,7 @@ import android.content.Context;
 import android.database.Cursor;
 import android.media.MediaScannerConnection;
 import android.net.Uri;
+import android.os.Environment;
 import android.os.Process;
 import android.os.storage.StorageManager;
 import android.os.storage.StorageVolume;
@@ -16,9 +17,11 @@ import android.system.StructStat;
 import app.filesplus.extension.DiagLog;
 import app.filesplus.extension.browse.LocalFolders;
 import app.filesplus.extension.clip.Clipboard;
+import app.filesplus.extension.clip.PasteRules;
 import app.filesplus.extension.ops.Fs;
 import app.filesplus.extension.ops.LocalFs;
 import app.filesplus.extension.ops.VerifiedCopy;
+import app.filesplus.extension.ops.VerifiedFolderMove;
 
 import java.io.File;
 import java.io.IOException;
@@ -36,7 +39,7 @@ import java.util.concurrent.Executors;
 /**
  * File operations for "move selected files to the current folder tab". No app types, no UI.
  *
- * Same-volume moves reserve a target and rename onto it. Cross-volume regular files use verified
+ * Same-volume moves reserve a target and rename onto it. Cross-volume files and folders use verified
  * copy followed by a rename to the FilesPlus trash on the source volume.
  */
 public final class TabMove {
@@ -53,11 +56,10 @@ public final class TabMove {
         public int moved;
         public int skipped;
         public int failed;
-        /** Subset of {@link #failed}: folders that sit on another volume than the destination. */
-        public int crossVolume;
         public final EnumSet<VerifiedCopy.Reason> reasons = EnumSet.noneOf(VerifiedCopy.Reason.class);
         public boolean hashStopped;
         public boolean sourceKept;
+        public final List<String> keptSources = new ArrayList<>();
     }
 
     private static final class CopyFailure extends IOException {
@@ -66,13 +68,6 @@ public final class TabMove {
         CopyFailure(VerifiedCopy.Reason reason) {
             super(reason.name());
             this.reason = reason;
-        }
-    }
-
-    /** The move needs a copy (different volume). Nothing was changed. */
-    private static final class CrossVolumeException extends IOException {
-        CrossVolumeException(String message, Throwable cause) {
-            super(message, cause);
         }
     }
 
@@ -94,18 +89,6 @@ public final class TabMove {
             }, "filesplus-file-ops"));
         }
         return fileExecutor;
-    }
-
-    /** Same language rule as the folder-tab messages (the app's configured locale). */
-    public static String crossVolumeNote(Context context) {
-        return crossVolumeNote("ja".equals(
-                context.getResources().getConfiguration().getLocales().get(0).getLanguage()));
-    }
-
-    /** User-visible explanation for {@link Result#crossVolume}. */
-    public static String crossVolumeNote(boolean japanese) {
-        return japanese ? "フォルダの SD カードとの間の移動は次の版で対応します"
-                : "Moving folders to/from the SD card is supported in the next version";
     }
 
     public static String lastCrossVolumeCopy() { return lastCrossVolumeCopy; }
@@ -155,19 +138,24 @@ public final class TabMove {
 
         void done(File target);
 
-        default void partStarted(File part) throws IOException {}
+        default void partStarted(File part, boolean directory) throws IOException {}
 
-        default void partFinished(File part) {}
+        default void partFinished(File part, boolean directory) {}
     }
 
     /** Same as {@link #move(Context, List, File)}, reporting every reserved name to {@code listener} (may be null). */
     public static Result move(Context context, List<String> sources, File destination,
                               ReservationListener listener) {
-        return move(context, sources, destination, listener, new VerifiedCopy.Job());
+        return move(context, sources, destination, listener, new VerifiedCopy.Job(), null);
+    }
+
+    /** Recounts present items on the file executor before the paste touches the destination. */
+    public static VerifiedFolderMove.PasteBudget measurePaste(List<String> sources) throws IOException {
+        return VerifiedFolderMove.measurePaste(LOCAL, sources, PasteRules.MAX_ITEMS, PasteRules.MAX_BYTES);
     }
 
     public static Result move(Context context, List<String> sources, File destination,
-                              ReservationListener listener, VerifiedCopy.Job job) {
+                              ReservationListener listener, VerifiedCopy.Job job, VerifiedFolderMove.PasteBudget budget) {
         // Preview moves only need a running record if they start a cross-volume copy.
         PasteRecord standalone = listener == null ? new PasteRecord(context) : null;
         ReservationListener recorder = standalone == null ? listener : standalone;
@@ -195,7 +183,7 @@ public final class TabMove {
                     continue;
                 }
                 boolean directory = sourceStat.type == Fs.Type.DIRECTORY;
-                List<String> childPaths = Collections.emptyList();
+                List<String> childPaths = new ArrayList<>();
                 if (directory) {
                     File canonical = source.getCanonicalFile();
                     if (FolderTabContext.protectedPath(canonical, LocalFolders.roots(context), true))
@@ -204,21 +192,21 @@ public final class TabMove {
                     String src = canonical.getPath().toLowerCase(Locale.ROOT) + File.separator;
                     String dst = destination.getCanonicalPath().toLowerCase(Locale.ROOT) + File.separator;
                     if (dst.startsWith(src)) throw new IOException("Cannot move a folder into itself or below itself");
-                    // Read before the move: these are the paths whose MediaStore rows become stale.
-                    childPaths = FolderTrash.mediaPaths(context, source);
                 }
                 File target;
                 Fs.Stat destStat = LOCAL.lstat(destination.getPath());
-                if (sourceStat.type == Fs.Type.FILE && destStat != null && sourceStat.device != destStat.device) {
+                if (destStat != null && sourceStat.device != destStat.device) {
                     // Some SD names fail at reservation time, before rename could report EXDEV.
-                    target = copyAcrossVolumes(context, source, destination, recorder, job, result);
+                    target = copyAcrossVolumes(context, source, sourceStat, destination, recorder, job, result,
+                            childPaths, budget);
                 } else {
+                    if (directory) childPaths.addAll(FolderTrash.mediaPaths(context, source));
                     try {
                         target = transfer(source, destination, directory, recorder);
-                    } catch (CrossVolumeException e) {
-                        if (directory) throw e;
-                        if (sourceStat.type != Fs.Type.FILE) throw new IOException("Unsupported source type", e);
-                        target = copyAcrossVolumes(context, source, destination, recorder, job, result);
+                    } catch (ErrnoException e) {
+                        childPaths.clear();
+                        target = copyAcrossVolumes(context, source, sourceStat, destination, recorder, job, result,
+                                childPaths, budget);
                     }
                 }
                 result.moved++;
@@ -231,10 +219,6 @@ public final class TabMove {
                 }
                 if (!target.getName().equals(source.getName()))
                     DiagLog.i(AREA, "Renamed on conflict: " + source.getName() + " -> " + target.getName());
-            } catch (CrossVolumeException e) {
-                result.failed++;
-                result.crossVolume++;
-                DiagLog.e(AREA, "Folder on a different volume, leaving " + path, e);
             } catch (CopyFailure e) {
                 result.failed++;
                 result.reasons.add(e.reason);
@@ -248,12 +232,13 @@ public final class TabMove {
         if (standalone != null) standalone.end();
         syncMediaStore(context, oldPaths, newPaths);
         DiagLog.i(AREA, "Move to " + destination + ": moved=" + result.moved + ", skipped=" + result.skipped
-                + ", failed=" + result.failed + " (other volume=" + result.crossVolume + ")");
+                + ", failed=" + result.failed);
         return result;
     }
 
-    private static File copyAcrossVolumes(Context context, File source, File destination,
-                                          ReservationListener listener, VerifiedCopy.Job job, Result result)
+    private static File copyAcrossVolumes(Context context, File source, Fs.Stat sourceStat, File destination,
+                                          ReservationListener listener, VerifiedCopy.Job job, Result result,
+                                          List<String> childPaths, VerifiedFolderMove.PasteBudget budget)
             throws IOException {
         long started = System.nanoTime();
         long bytes = 0;
@@ -264,31 +249,44 @@ public final class TabMove {
             if (parent == null || !parent.equals(parent.getCanonicalFile()) || !folder.equals(folder.getCanonicalFile())) {
                 throw new IOException("Linked parent or destination");
             }
+            boolean directory = sourceStat.type == Fs.Type.DIRECTORY;
+            if (!directory && sourceStat.type != Fs.Type.FILE) {
+                outcome = "FAILED/" + VerifiedCopy.Reason.LINK;
+                throw new CopyFailure(VerifiedCopy.Reason.TOP_LEVEL_LINK);
+            }
+            if (directory && (!folder.canWrite() || !Environment.isExternalStorageManager())) {
+                throw new IOException("Destination is not writable or all-files access is missing: " + folder);
+            }
             StorageManager storage = context.getSystemService(StorageManager.class);
             StorageVolume volume = storage.getStorageVolume(folder);
             boolean removable = volume != null && volume.isRemovable();
+            VerifiedCopy.Observer observer = copyObserver(listener, directory);
+            if (directory) {
+                VerifiedFolderMove.Result copy = VerifiedFolderMove.move(LOCAL, source.getPath(), LOCAL,
+                        folder.getPath(), source.getName(), removable, job, () -> false,
+                        observer, (opId, fileCount, totalBytes, check) -> {
+                            File root = sourceVolume(context, source, sourceStat);
+                            FolderTrash.moveToTrash(source, root, fileCount, totalBytes, opId, () -> {
+                                if (!parent.equals(parent.getCanonicalFile())) throw new Fs.SourceChanged(source.getPath());
+                                check.check();
+                            });
+                        }, budget);
+                bytes = copy.bytes;
+                if (copy.reason != null) {
+                    outcome = "FAILED/" + copy.reason;
+                    throw new CopyFailure(copy.reason);
+                }
+                for (String relative : copy.children) childPaths.add(new File(source, relative).getPath());
+                outcome = "MOVED";
+                if (copy.sourceKept) {
+                    keepSource(result, source);
+                    outcome = "MOVED (source kept)";
+                }
+                return new File(copy.target);
+            }
+
             VerifiedCopy.Result copy = VerifiedCopy.copy(LOCAL, source.getPath(), LOCAL, folder.getPath(),
-                    source.getName(), removable, job, () -> false, new VerifiedCopy.Observer() {
-                        @Override public void partStarted(String path) throws IOException {
-                            listener.partStarted(new File(path));
-                        }
-
-                        @Override public void partFinished(String path) {
-                            listener.partFinished(new File(path));
-                        }
-
-                        @Override public void reserved(String path) {
-                            notifyReserved(listener, new File(path), true);
-                        }
-
-                        @Override public void reservationDone(String path) {
-                            notifyReserved(listener, new File(path), false);
-                        }
-
-                        @Override public void log(String message, Throwable error) {
-                            DiagLog.e(AREA, message, error);
-                        }
-                    });
+                    source.getName(), removable, job, () -> false, observer);
             bytes = copy.bytes;
             if (!copy.succeeded()) {
                 outcome = "FAILED/" + copy.reason;
@@ -297,14 +295,9 @@ public final class TabMove {
             outcome = "MOVED";
             try {
                 if (!copy.source.unchanged(LOCAL.lstat(source.getPath()))) throw new Fs.SourceChanged(source.getPath());
-                File root = LocalFolders.volumeRoot(context, source);
-                Fs.Stat rootStat = root == null ? null : LOCAL.lstat(root.getPath());
-                if (rootStat == null || rootStat.device != copy.source.device) {
-                    throw new IOException("Cannot resolve source volume for trash");
-                }
-                FolderTrash.moveFileToTrash(source, root, copy.opId, copy.source);
+                FolderTrash.moveFileToTrash(source, sourceVolume(context, source, copy.source), copy.opId, copy.source);
             } catch (Throwable t) {
-                result.sourceKept = true;
+                keepSource(result, source);
                 outcome = "MOVED/" + (t instanceof Fs.SourceChanged ? "SOURCE_CHANGED" : "IO") + " (source kept)";
                 DiagLog.e(AREA, outcome + ": " + source, t);
             }
@@ -318,20 +311,60 @@ public final class TabMove {
         }
     }
 
+    private static void keepSource(Result result, File source) {
+        result.sourceKept = true;
+        result.keptSources.add(source.getPath());
+    }
+
+    private static File sourceVolume(Context context, File source, Fs.Stat expected) throws IOException {
+        File root = LocalFolders.volumeRoot(context, source);
+        Fs.Stat rootStat = root == null ? null : LOCAL.lstat(root.getPath());
+        if (rootStat == null || rootStat.device != expected.device) {
+            throw new IOException("Cannot resolve source volume for trash");
+        }
+        return root;
+    }
+
+    private static VerifiedCopy.Observer copyObserver(ReservationListener listener, boolean directory) {
+        return new VerifiedCopy.Observer() {
+            @Override public void partStarted(String path) throws IOException {
+                listener.partStarted(new File(path), directory);
+            }
+
+            @Override public void partFinished(String path) {
+                listener.partFinished(new File(path), directory);
+            }
+
+            @Override public void reserved(String path) {
+                notifyReserved(listener, new File(path), true);
+            }
+
+            @Override public void reservationDone(String path) {
+                notifyReserved(listener, new File(path), false);
+            }
+
+            @Override public void log(String message, Throwable error) {
+                DiagLog.e(AREA, message, error);
+            }
+        };
+    }
+
     private static final class PasteRecord implements ReservationListener {
         private final Context context;
         private long token;
 
         PasteRecord(Context context) { this.context = context; }
 
-        @Override public void partStarted(File part) throws IOException {
+        @Override public void partStarted(File part, boolean directory) throws IOException {
             if (token == 0) token = Clipboard.beginPaste(context, part.getParent());
-            if (!Clipboard.recordPart(context, token, part.getPath())) {
+            if (!Clipboard.recordPart(context, token, part.getPath(), directory)) {
                 throw new IOException("Cannot record temporary path: " + part);
             }
         }
 
-        @Override public void partFinished(File part) { Clipboard.forgetPart(context, token, part.getPath()); }
+        @Override public void partFinished(File part, boolean directory) {
+            Clipboard.forgetPart(context, token, part.getPath(), directory);
+        }
 
         @Override public void reserved(File target) {
             if (token != 0) Clipboard.reserve(context, token, target.getPath());
@@ -364,10 +397,10 @@ public final class TabMove {
     /**
      * Reserves a free name in {@code destination} and renames the source onto it. {@code rename(2)} replaces
      * silently, so it is only ever called on a name that this call just created itself (zero-byte file or empty
-     * folder). Throws {@link CrossVolumeException} on EXDEV with the source untouched.
+     * folder). Propagates EXDEV with the source untouched so the caller can copy it.
      */
     private static File transfer(File source, File destination, boolean directory, ReservationListener listener)
-            throws IOException {
+            throws IOException, ErrnoException {
         String name = source.getName();
         for (int n = 0; n < VerifiedCopy.MAX_NAME_ATTEMPTS; n++) {
             File target = new File(destination, VerifiedCopy.candidate(name, directory, n));
@@ -387,10 +420,7 @@ public final class TabMove {
                 } catch (ErrnoException e) {
                     boolean stillOurs = isUntouched(reservation);
                     release(reservation);
-                    if (e.errno == OsConstants.EXDEV) {
-                        throw new CrossVolumeException("Source and destination are on different volumes: "
-                                + source + " -> " + target, e);
-                    }
+                    if (e.errno == OsConstants.EXDEV) throw e;
                     if (directory && (e.errno == OsConstants.ENOTEMPTY || e.errno == OsConstants.EEXIST)) {
                         if (stillOurs) {
                             // Our placeholder is still empty, so the platform itself refused to replace it:
