@@ -1,3 +1,9 @@
+## [1.0.0-dev.32](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.31...v1.0.0-dev.32) (2026-11-24)
+
+### ✨ New Features
+
+* Move files to and from the SD card with SHA-256 verification ([2be4868](https://github.com/yak9909/FilesPlus/commit/2be486849a07820a715d192e66ded8e9e56827d0))
+
 ## [1.0.0-dev.31](https://github.com/yak9909/FilesPlus/compare/v1.0.0-dev.30...v1.0.0-dev.31) (2026-11-24)
 
 ### ✨ New Features
