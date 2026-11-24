@@ -254,7 +254,7 @@ public final class SmbSessionPool {
             if (c.user.isEmpty()) {
                 auth = AuthenticationContext.guest();
             } else {
-                String password = passwordOverride != null ? passwordOverride : SmbConnectionStore.password(c.id);
+                String password = passwordOverride != null ? passwordOverride : SmbConnectionStore.passwordFor(c);
                 // Never try an empty password for a lost one: repeated failed logons can lock the account.
                 if (password == null) throw new SmbErrors.PasswordMissingException();
                 auth = new AuthenticationContext(c.user, password.toCharArray(), c.domain);
